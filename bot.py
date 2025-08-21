@@ -2,7 +2,6 @@ import random
 import psutil
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-# Токен вашего бота, полученный от @BotFather
 TOKEN = "5461281270:AAEBJ_EeONrpc-WyHb_KkFBXnPlmkCalsPQ"
 
 
