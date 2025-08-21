@@ -14,8 +14,8 @@ async def start(update, context):
 
 # Функция для обработки текстовых сообщений
 async def handle_message(update, context):
-    # random_number = random.randint(0, 10000000)
-    await update.message.reply_text(str(f"{psutil.cpu_percent(interval=1)}"))
+    random_number = random.randint(0, 10000000)
+    await update.message.reply_text(str(random_number))
 
 
 def main():
