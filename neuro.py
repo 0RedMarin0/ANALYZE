@@ -6,7 +6,7 @@ from sklearn.model_selection import train_test_split
 import talib
 
 # Загрузка данных
-df = pd.read_csv('BD/SBER_60.csv').head(33000)
+df = pd.read_csv('BD/SBER_10.csv').head(110000)
 
 TIME_STEPS = 100
 
@@ -82,19 +82,33 @@ print(f"Train sequences: {X_train_seq.shape}, {y_train_seq.shape}")
 
 model = tf.keras.Sequential()
 
-# Первый LSTM слой
-model.add(tf.keras.layers.LSTM(100, return_sequences=True, input_shape=(X_train_seq.shape[1], X_train_seq.shape[2])))
+# Увеличенная архитектура для больших данных
+model.add(tf.keras.layers.LSTM(256, return_sequences=True, input_shape=(X_train_seq.shape[1], X_train_seq.shape[2])))
+model.add(tf.keras.layers.BatchNormalization())
+model.add(tf.keras.layers.Dropout(0.3))
 
-# Второй LSTM слой
-model.add(tf.keras.layers.LSTM(100, return_sequences=True))
+model.add(tf.keras.layers.LSTM(128, return_sequences=True))
+model.add(tf.keras.layers.BatchNormalization())
+model.add(tf.keras.layers.Dropout(0.3))
 
-# Третий LSTM слой (без return_sequences)
-model.add(tf.keras.layers.LSTM(50))
-
-# Dropout для борьбы с переобучением
+model.add(tf.keras.layers.LSTM(64, return_sequences=True))
+model.add(tf.keras.layers.BatchNormalization())
 model.add(tf.keras.layers.Dropout(0.2))
 
-model.add(tf.keras.layers.Dense(1))
+model.add(tf.keras.layers.LSTM(32))
+model.add(tf.keras.layers.BatchNormalization())
+model.add(tf.keras.layers.Dropout(0.2))
+
+# Дополнительные полносвязные слои
+model.add(tf.keras.layers.Dense(64, activation='relu'))
+model.add(tf.keras.layers.BatchNormalization())
+model.add(tf.keras.layers.Dropout(0.2))
+
+model.add(tf.keras.layers.Dense(32, activation='relu'))
+model.add(tf.keras.layers.Dropout(0.1))
+
+model.add(tf.keras.layers.Dense(1))  # Выходной слой
+
 model.summary()
 
 
@@ -110,18 +124,41 @@ print(f"y_train_seq: {y_train_seq.shape}")
 print(f"X_val_seq: {X_val_seq.shape}")
 print(f"y_val_seq: {y_val_seq.shape}")
 
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+
+# Callbacks для улучшения обучения
+callbacks = [
+    EarlyStopping(
+        monitor='val_loss',
+        patience=15,
+        restore_best_weights=True,
+        verbose=1
+    ),
+    ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=10,
+        min_lr=0.0001,
+        verbose=1
+    )
+]
+
 history = model.fit(
     X_train_seq, y_train_seq,
     batch_size=32,
-    epochs=10,
+    epochs=50,
     validation_data=(X_val_seq, y_val_seq),
+    callbacks=callbacks,
     verbose=1
 )
 
 # Сохраняем архитектуру и веса модели
-model.save('models/my_lstm_model_60_minus5_33000.keras')
+model.save('models/my_lstm_model_10_minus5_110000.keras')
 
 # Альтернативно можно сохранить так:
 # model.save('my_lstm_model', save_format='keras')
 
-print("Модель сохранена как 'my_lstm_model_60_minus40.keras'")
+print("Модель сохранена")
+
+# import os
+# os.system("shutdown /s /t 5")  # Выключение через 5 секунд

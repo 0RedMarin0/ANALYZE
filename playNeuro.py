@@ -9,12 +9,12 @@ import matplotlib.pyplot as plt
 
 # Шаг 1: Загрузка обученной модели
 print("Загрузка обученной модели...")
-model = tf.keras.models.load_model('models/my_lstm_model_60_minus5.keras')
+model = tf.keras.models.load_model('models/my_lstm_model_10_minus5_110000.keras')
 print("Модель успешно загружена!")
 
 # Шаг 2: Загрузка новых данных для прогноза
 print("Загрузка новых данных...")
-new_df = pd.read_csv('BD/GAZP_60.csv').iloc[34500:]
+new_df = pd.read_csv('BD/PIKK_10_NOW.csv').tail(1000)
 
 # Проверяем наличие необходимых колонок
 required_columns = ['open', 'high', 'low', 'close', 'volume']
@@ -119,8 +119,7 @@ ax1.grid(True, alpha=0.3)
 
 # График 2: Вероятности роста/падения
 colors = ['red' if x < 0 else 'green' for x in results_df['probability']]
-ax2.bar(results_df.index, results_df['probability'], color=colors, alpha=0.7)
-ax2.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+ax2.plot(results_df.index, results_df['probability'], label='Close Price', color='blue', linewidth=2)
 ax2.set_title('Вероятность роста/падения (%)', fontsize=14, fontweight='bold')
 ax2.set_ylabel('Процент изменения', fontsize=12)
 ax2.grid(True, alpha=0.3)
