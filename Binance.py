@@ -98,10 +98,10 @@ def start_crypto(filename, start_date, end_date, interval, days_chunk, symbol):
 
         i += 1
 
-        # Проверяем текущую дату (не заходим в будущее)
-        if current_start > datetime.now():
-            print("Достигнута текущая дата")
-            break
+        # # Проверяем текущую дату (не заходим в будущее)
+        # if current_start > datetime.now():
+        #     print("Достигнута текущая дата")
+        #     break
 
         if stop >= 5:  # Меньше пустых запросов для остановки
             print("Слишком много пустых ответов, завершаем")
@@ -129,12 +129,12 @@ def get_popular_pairs():
 
 if __name__ == '__main__':
     # Настройки для сбора данных
-    start_date = datetime(2025, 9, 1)  # Начальная дата
-    end_date = datetime(2025, 9, 3)  # Конец первого чанка
+    start_date = datetime(2023, 2, 20)  # Начальная дата
+    end_date = datetime(2023, 2, 22)  # Конец первого чанка
     interval = '15m'  # 5-минутные свечи
-    days_chunk = 3  # 7 дней за запрос (для 5m интервала)
+    days_chunk = 7  # 7 дней за запрос (для 5m интервала)
     symbol = 'BTCUSDT'  # Биткоин к USDT
-    filename = f'BDcrypt/CRYPTO_{symbol}_{interval}.csv'
+    filename = f'BDcrypt/CRYPTO_{symbol}_{interval}_YEAR.csv'
 
     print(f"Собираем данные для {symbol}")
     print(f"Интервал: {interval}")
