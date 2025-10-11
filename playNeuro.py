@@ -14,7 +14,7 @@ print("Модель успешно загружена!")
 
 # Шаг 2: Загрузка новых данных для прогноза
 print("Загрузка новых данных...")
-new_df = pd.read_csv('BD/PIKK_10_NOW.csv').tail(1000)
+new_df = pd.read_csv('BD/MRKZ_10_NOW.csv').tail(1000)
 
 # Проверяем наличие необходимых колонок
 required_columns = ['open', 'high', 'low', 'close', 'volume']
