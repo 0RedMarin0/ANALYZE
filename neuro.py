@@ -1,14 +1,18 @@
+from keras.src.saving import register_keras_serializable
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import talib
+from tensorflow.keras.models import load_model
+
+
 
 FILE = 'BDcrypt/CRYPTO_BTCUSDT_15m_YEAR.csv'
 TIME_STEPS = 350
 MODEL_NAME = 'models/crypto_model_15_delta_FINAL.keras'
 
-df = pd.read_csv(FILE).head(90000)
+df = pd.read_csv(FILE).tail(20000)
 
 # === Индикаторы ===
 df['RSI'] = talib.RSI(df['close'])
@@ -38,8 +42,11 @@ df['candle_body'] = df['close'] - df['open']
 df['upper_shadow'] = df['high'] - df[['close','open']].max(axis=1)
 df['lower_shadow'] = df[['close','open']].min(axis=1) - df['low']
 
+df['returns'] = df['close'].pct_change()
+df['log_return'] = np.log(df['close'] / df['close'].shift(1))
+
 # === Целевая переменная: лог-доходность через 5 свечей ===
-df['target_close'] = np.log(df['close'].shift(-10) / df['close'])
+df['target_close'] = np.log(df['close'].shift(-6) / df['close']) * 2
 df = df.dropna()
 
 # === Признаки ===
@@ -49,7 +56,8 @@ feature_columns = [
     'BB_upper', 'BB_middle', 'BB_lower',
     'SMA_20', 'EMA_20', 'SMA_100', 'EMA_100', 'SMA_200', 'EMA_200', 'SMA_50',
     'CCI', 'ADX', 'volatility',
-    'trend_strength', 'momentum', 'vol_ratio', 'price_pos', 'slope', 'candle_body', 'upper_shadow', 'lower_shadow'
+    'trend_strength', 'momentum', 'vol_ratio', 'price_pos', 'slope',
+    'candle_body', 'upper_shadow', 'lower_shadow', 'returns', 'log_return'
 ]
 
 features = df[feature_columns]
@@ -99,8 +107,10 @@ x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(64, return_sequences=True
 # === Attention ===
 attn = tf.keras.layers.MultiHeadAttention(num_heads=4, key_dim=64)
 attn_out = attn(x, x)
+attn_out = tf.keras.layers.Dense(128, activation='relu')(attn_out)
 x = tf.keras.layers.Add()([x, attn_out])
 x = tf.keras.layers.LayerNormalization()(x)
+
 
 x = tf.keras.layers.GlobalAveragePooling1D()(x)
 x = tf.keras.layers.Dense(128, activation='relu')(x)
@@ -110,11 +120,19 @@ outputs = tf.keras.layers.Dense(1, activation='linear')(x)
 
 model = tf.keras.Model(inputs, outputs)
 
+
+@register_keras_serializable(package="Custom", name="directional_loss")
+def directional_loss(y_true, y_pred):
+    diff = y_pred - y_true
+    sign_penalty = tf.where(tf.sign(y_pred) != tf.sign(y_true), 2.0, 1.0)
+    return tf.reduce_mean(tf.abs(diff) * sign_penalty)
+
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
-    loss=tf.keras.losses.Huber(),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=5e-4),
+    loss=directional_loss,
     metrics=['mae']
 )
+
 
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
@@ -123,16 +141,19 @@ callbacks = [
     ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=6, min_lr=1e-5, verbose=1)
 ]
 
-history = model.fit(
-    X_train_seq, y_train_seq,
-    epochs=30,
-    batch_size=128,
-    validation_data=(X_val_seq, y_val_seq),
-    callbacks=callbacks,
-    verbose=1
-)
+try:
+    history = model.fit(
+        X_train_seq, y_train_seq,
+        epochs=10,
+        batch_size=128,
+        validation_data=(X_val_seq, y_val_seq),
+        callbacks=callbacks,
+        verbose=1
+    )
+except KeyboardInterrupt:
+    print("\n⛔ Обучение остановлено вручную.")
+    model.save(MODEL_NAME)
+    print(f"✅ Модель сохранена как {MODEL_NAME}")
 
-model.save(MODEL_NAME)
-
-import os
-os.system("shutdown /p")
+# import os
+# os.system("shutdown /p")

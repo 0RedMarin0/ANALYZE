@@ -7,14 +7,25 @@ import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
+# def directional_loss(y_true, y_pred):
+#     # Ошибка по направлению: если знак разный — штраф сильнее
+#     diff = y_pred - y_true
+#     sign_penalty = tf.where(tf.sign(y_pred) != tf.sign(y_true), 2.0, 1.0)
+#     return tf.reduce_mean(tf.abs(diff) * sign_penalty)
+
+
+
 # Шаг 1: Загрузка обученной модели
 print("Загрузка обученной модели...")
-model = tf.keras.models.load_model('models/crypto_model_15_delta_fixed.keras')
+model = tf.keras.models.load_model(
+    "models/crypto_model_15_delta_FINAL.keras",
+    compile=False  # <-- пропускаем компиляцию
+)
 print("Модель успешно загружена!")
 
 # Шаг 2: Загрузка новых данных для прогноза
 print("Загрузка новых данных...")
-new_df = pd.read_csv('BDcrypt/CRYPTO_BTCUSDT_15m_YEAR.csv').tail(5000)
+new_df = pd.read_csv('BDcrypt/CRYPTO_BTCUSDT_15m_NOOW.csv').tail(1000)
 
 # Проверяем наличие необходимых колонок
 required_columns = ['open', 'high', 'low', 'close', 'volume']
@@ -53,6 +64,9 @@ new_df['candle_body'] = new_df['close'] - new_df['open']
 new_df['upper_shadow'] = new_df['high'] - new_df[['close','open']].max(axis=1)
 new_df['lower_shadow'] = new_df[['close','open']].min(axis=1) - new_df['low']
 
+new_df['returns'] = new_df['close'].pct_change()
+new_df['log_return'] = np.log(new_df['close'] / new_df['close'].shift(1))
+
 # Удаляем строки с NaN (из-за индикаторов)
 new_df = new_df.dropna()
 print(f"Данные после очистки: {new_df.shape}")
@@ -67,7 +81,8 @@ feature_columns = [
     'BB_upper', 'BB_middle', 'BB_lower',
     'SMA_20', 'EMA_20', 'SMA_100', 'EMA_100', 'SMA_200', 'EMA_200', 'SMA_50',
     'CCI', 'ADX', 'volatility',
-    'trend_strength', 'momentum', 'vol_ratio', 'price_pos', 'slope', 'candle_body', 'upper_shadow', 'lower_shadow'
+    'trend_strength', 'momentum', 'vol_ratio', 'price_pos', 'slope',
+    'candle_body', 'upper_shadow', 'lower_shadow', 'returns', 'log_return'
 ]
 
 # Загружаем скейлеры (если сохраняли) или создаем новые
@@ -81,7 +96,7 @@ new_features = new_df[feature_columns]
 new_features_scaled = feature_scaler.fit_transform(new_df[feature_columns])
 
 # Шаг 5: Создание последовательностей для прогноза
-TIME_STEPS = 250
+TIME_STEPS = 350
 
 def create_prediction_sequences(data, time_steps=100):
     """Создает последовательности для прогнозирования"""

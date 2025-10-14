@@ -129,11 +129,11 @@ def get_popular_pairs():
 
 if __name__ == '__main__':
     # Настройки для сбора данных
-    start_date = datetime(2023, 2, 20)  # Начальная дата
-    end_date = datetime(2023, 2, 22)  # Конец первого чанка
+    start_date = datetime(2024, 8, 20)  # Начальная дата
+    end_date = datetime(2024, 8, 22)  # Конец первого чанка
     interval = '15m'  # 5-минутные свечи
     days_chunk = 7  # 7 дней за запрос (для 5m интервала)
-    symbol = 'BTCUSDT'  # Биткоин к USDT
+    symbol = 'ETHUSDT'  # Биткоин к USDT
     filename = f'BDcrypt/CRYPTO_{symbol}_{interval}_YEAR.csv'
 
     print(f"Собираем данные для {symbol}")

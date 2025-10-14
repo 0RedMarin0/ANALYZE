@@ -58,10 +58,10 @@ def start(filename, start_date, end_date, interval, day, ticker):
 
 
 if __name__ == '__main__':
-    start_date = datetime(2025, 8, 20, 1, 0, 0)  # 2025-07-01 07:00:00 2025-08-22 17:44:59
-    end_date = datetime(2025, 8, 22, 23, 59, 0)  # 2025-07-01 12:00:00
+    start_date = datetime(2024, 8, 20, 1, 0, 0)  # 2025-07-01 07:00:00 2025-08-22 17:44:59
+    end_date = datetime(2024, 8, 22, 23, 59, 0)  # 2025-07-01 12:00:00
     interval = 10
-    day = 3
+    day = 7
     ticker = 'MRKZ'
-    filename = f'BD/{ticker}_{interval}_NOW.csv'
+    filename = f'BD/{ticker}_{interval}_YEAR.csv'
     start(filename, start_date, end_date, interval, day, ticker)
