@@ -30,7 +30,7 @@ class DataCreate:
 
     def default_indi(self):
         self.list_sign.extend(['MACD', 'MACD_signal', 'MACD_hist', 'BB_upper', 'BB_lower', 'BB_middle',
-                               'SMA_20', 'SMA_50', 'SMA_200', 'EMA_20', 'EMA_50', 'EMA_200',
+                               'SMA_50', 'SMA_200', 'EMA_50', 'EMA_200',
                                'CCI', 'ADX', 'volatility'])
 
         # self.data['RSI'] = talib.RSI(self.data['close'], period=14)
