@@ -1,70 +1,36 @@
-from keras.src.saving import register_keras_serializable
+# from keras.src.saving import register_keras_serializable
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import talib
-from tensorflow.keras.models import load_model
+import table
 
 
+FILE = 'BD/SBER_10.csv'
+TIME_STEPS = 10
+MODEL_NAME = 'models/model_10_version_2.keras'
 
-FILE = 'BDcrypt/CRYPTO_BTCUSDT_15m_YEAR.csv'
-TIME_STEPS = 350
-MODEL_NAME = 'models/crypto_model_15_delta_FINAL.keras'
+df_start = table.DataCreate(FILE)
+df = df_start.table
 
-df = pd.read_csv(FILE).tail(20000)
+for i in range(1, 21):
+    df[f'close_plus_{i}'] = df['close'].shift(-i)
+# Будет ли рост через 5 свечей? (1 = рост, 0 = падение)
+df['future_close'] = df['close_plus_5']
+df['target_close'] = (df['future_close'] > df['close']).astype(int)
+# Максимум за 20 свечей вперед
+close_columns = [f'close_plus_{i}' for i in range(1, 21)]
+df['target_close'] = df[close_columns].max(axis=1)
+# df['target_close'] = (df['close'].shift(-5) / df['close']) - 1
 
-# === Индикаторы ===
-df['RSI'] = talib.RSI(df['close'])
-df['MACD'], df['MACD_signal'], df['MACD_hist'] = talib.MACD(df['close'])
-df['BB_upper'], df['BB_middle'], df['BB_lower'] = talib.BBANDS(df['close'])
-df['SMA_20'] = talib.SMA(df['close'], 20)
-df['EMA_20'] = talib.EMA(df['close'], 20)
-df['SMA_50'] = talib.SMA(df['close'], 50)
-df['SMA_100'] = talib.SMA(df['close'], 100)
-df['EMA_100'] = talib.EMA(df['close'], 100)
-df['SMA_200'] = talib.SMA(df['close'], 200)
-df['EMA_200'] = talib.EMA(df['close'], 200)
-df['CCI'] = talib.CCI(df['high'], df['low'], df['close'])
-df['ADX'] = talib.ADX(df['high'], df['low'], df['close'])
-df['volatility'] = talib.ATR(df['high'], df['low'], df['close'], 14)
-
-# === Контекстные признаки ===
-df['trend_strength'] = df['SMA_50'] / df['SMA_200'] - 1
-df['momentum'] = df['close'] / df['close'].shift(10) - 1
-df['vol_ratio'] = df['volume'] / df['volume'].rolling(50).mean()
-df['price_pos'] = (df['close'] - df['low'].rolling(100).min()) / (df['high'].rolling(100).max() - df['low'].rolling(100).min())
-
-df['slope'] = df['close'].diff(5)
-df['slope'] = df['slope'] / df['close'].shift(5)
-
-df['candle_body'] = df['close'] - df['open']
-df['upper_shadow'] = df['high'] - df[['close','open']].max(axis=1)
-df['lower_shadow'] = df[['close','open']].min(axis=1) - df['low']
-
-df['returns'] = df['close'].pct_change()
-df['log_return'] = np.log(df['close'] / df['close'].shift(1))
-
-# === Целевая переменная: лог-доходность через 5 свечей ===
-df['target_close'] = np.log(df['close'].shift(-6) / df['close']) * 2
 df = df.dropna()
 
 # === Признаки ===
-feature_columns = [
-    'open', 'high', 'low', 'close', 'volume',
-    'RSI', 'MACD', 'MACD_signal', 'MACD_hist',
-    'BB_upper', 'BB_middle', 'BB_lower',
-    'SMA_20', 'EMA_20', 'SMA_100', 'EMA_100', 'SMA_200', 'EMA_200', 'SMA_50',
-    'CCI', 'ADX', 'volatility',
-    'trend_strength', 'momentum', 'vol_ratio', 'price_pos', 'slope',
-    'candle_body', 'upper_shadow', 'lower_shadow', 'returns', 'log_return'
-]
-
+feature_columns = df_start.list_sign
 features = df[feature_columns]
 target = df['target_close']
 
 # === Масштабирование: StandardScaler вместо MinMax ===
-from sklearn.preprocessing import StandardScaler
 feature_scaler = StandardScaler()
 features_scaled = feature_scaler.fit_transform(features)
 
@@ -120,11 +86,15 @@ outputs = tf.keras.layers.Dense(1, activation='linear')(x)
 
 model = tf.keras.Model(inputs, outputs)
 
-
-@register_keras_serializable(package="Custom", name="directional_loss")
+#
+# @register_keras_serializable(package="Custom", name="directional_loss")
+# def directional_loss(y_true, y_pred):
+#     diff = y_pred - y_true
+#     sign_penalty = tf.where(tf.sign(y_pred) != tf.sign(y_true), 2.0, 1.0)
+#     return tf.reduce_mean(tf.abs(diff) * sign_penalty)
 def directional_loss(y_true, y_pred):
     diff = y_pred - y_true
-    sign_penalty = tf.where(tf.sign(y_pred) != tf.sign(y_true), 2.0, 1.0)
+    sign_penalty = tf.where(tf.sign(y_pred) != tf.sign(y_true), 5.0, 1.0)  # было 2.0
     return tf.reduce_mean(tf.abs(diff) * sign_penalty)
 
 model.compile(
@@ -141,6 +111,7 @@ callbacks = [
     ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=6, min_lr=1e-5, verbose=1)
 ]
 
+check = 0
 try:
     history = model.fit(
         X_train_seq, y_train_seq,
@@ -154,6 +125,11 @@ except KeyboardInterrupt:
     print("\n⛔ Обучение остановлено вручную.")
     model.save(MODEL_NAME)
     print(f"✅ Модель сохранена как {MODEL_NAME}")
+    check += 1
 
+if check == 0:
+    print("\n⛔ Обучение остановлено вручную.")
+    model.save(MODEL_NAME)
+    print(f"✅ Модель сохранена как {MODEL_NAME}")
 # import os
 # os.system("shutdown /p")

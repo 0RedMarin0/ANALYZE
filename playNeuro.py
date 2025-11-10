@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from sklearn.preprocessing import MinMaxScaler
 import talib
 import matplotlib
 matplotlib.use('TkAgg')
@@ -17,15 +16,12 @@ import matplotlib.pyplot as plt
 
 # Шаг 1: Загрузка обученной модели
 print("Загрузка обученной модели...")
-model = tf.keras.models.load_model(
-    "models/crypto_model_15_delta_FINAL.keras",
-    compile=False  # <-- пропускаем компиляцию
-)
+model = tf.keras.models.load_model("models/model_10_version_2.keras", compile=False)
 print("Модель успешно загружена!")
 
 # Шаг 2: Загрузка новых данных для прогноза
 print("Загрузка новых данных...")
-new_df = pd.read_csv('BDcrypt/CRYPTO_BTCUSDT_15m_NOOW.csv').tail(1000)
+new_df = pd.read_csv('BD/SBER_10.csv').tail(1000)
 
 # Проверяем наличие необходимых колонок
 required_columns = ['open', 'high', 'low', 'close', 'volume']
@@ -96,7 +92,7 @@ new_features = new_df[feature_columns]
 new_features_scaled = feature_scaler.fit_transform(new_df[feature_columns])
 
 # Шаг 5: Создание последовательностей для прогноза
-TIME_STEPS = 350
+TIME_STEPS = 10
 
 def create_prediction_sequences(data, time_steps=100):
     """Создает последовательности для прогнозирования"""
@@ -110,33 +106,25 @@ print(f"Создано {X_pred_seq.shape[0]} последовательност�
 
 # Шаг 6: Создание прогнозов
 print("Создание прогнозов...")
-predicted_log_returns = model.predict(X_pred_seq, verbose=1)
+# Для модели классификации используем predict для получения вероятностей
+probabilities = model.predict(X_pred_seq, verbose=1).flatten()
+
+# Получаем соответствующие цены закрытия
 close_prices = new_df['close'].values[TIME_STEPS:]
-
-# Преобразуем лог-доходность обратно в прогноз цены:
-predicted_close = close_prices * np.exp(predicted_log_returns.flatten())
-
-# Преобразуем прогнозы обратно в нормальные цены
-# Для этого нам нужно настроить target_scaler на исходные данные
-# Временно используем фиктивные данные для inverse_transform
-# dummy_target = np.array([new_df['close'].min(), new_df['close'].max()]).reshape(-1, 1)
-# target_scaler.fit(dummy_target)
-#
-# predictions = target_scaler.inverse_transform(predictions_scaled)
-
-# Шаг 7: Подготовка результатов
-close_prices = new_df['close'].values[TIME_STEPS:]
-dates = new_df.index[TIME_STEPS:]  # или new_df['date'] если есть колонка с датами
-
-# Вычисляем "вероятность" - процент ожидаемого изменения
-probabilities = (predicted_close - close_prices) / close_prices * 100
 
 # Создаем DataFrame с результатами
 results_df = pd.DataFrame({
     'close': close_prices,
-    'predicted_close': predicted_close,
-    'probability': probabilities
+    'probability_rise': probabilities,  # Вероятность роста
+    'predicted_class': (probabilities > 0.5).astype(int)  # 1 - рост, 0 - падение
 })
+
+# Вычисляем процент уверенности
+results_df['confidence_percentage'] = np.where(
+    results_df['predicted_class'] == 1,
+    results_df['probability_rise'] * 100,
+    (1 - results_df['probability_rise']) * 100
+)
 
 # Сохраняем в CSV
 results_df.to_csv('predictions_results.csv', index=False, header=True)
@@ -157,22 +145,23 @@ ax1.set_ylabel('Цена', fontsize=12)
 ax1.legend()
 ax1.grid(True, alpha=0.3)
 
-# График 2: Вероятности роста/падения
-colors = ['red' if x < 0 else 'green' for x in results_df['probability']]
-ax2.plot(results_df.index, results_df['probability'], label='Close Price', color='blue', linewidth=2)
-ax2.set_title('Вероятность роста/падения (%)', fontsize=14, fontweight='bold')
-ax2.set_ylabel('Процент изменения', fontsize=12)
+# График 2: Вероятности роста
+ax2.plot(results_df.index, results_df['probability_rise'] * 100, color='green', linewidth=2)
+ax2.axhline(y=50, color='red', linestyle='--', linewidth=1, label='Порог 50%')
+ax2.set_title('Вероятность роста через 5 свечей (%)', fontsize=14, fontweight='bold')
+ax2.set_ylabel('Вероятность роста (%)', fontsize=12)
+ax2.set_ylim(0, 100)
+ax2.legend()
 ax2.grid(True, alpha=0.3)
 
-# График 3: Распределение вероятностей (НЕ синхронизируется, так как это гистограмма)
-ax3.hist(results_df['probability'], bins=50, color='purple', alpha=0.7, edgecolor='black')
-ax3.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Нейтральная линия')
-ax3.set_title('Распределение вероятностей', fontsize=14, fontweight='bold')
-ax3.set_xlabel('Процент изменения', fontsize=12)
+# График 3: Распределение вероятностей
+ax3.hist(results_df['probability_rise'], bins=50, color='purple', alpha=0.7, edgecolor='black')
+ax3.axvline(x=0.5, color='red', linestyle='--', linewidth=2, label='Порог 50%')
+ax3.set_title('Распределение вероятностей роста', fontsize=14, fontweight='bold')
+ax3.set_xlabel('Вероятность роста', fontsize=12)
 ax3.set_ylabel('Количество', fontsize=12)
 ax3.legend()
 ax3.grid(True, alpha=0.3)
-
 plt.tight_layout()
 plt.savefig('predictions_plot.png', dpi=300, bbox_inches='tight')
 plt.show()
