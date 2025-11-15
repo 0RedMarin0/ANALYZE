@@ -33,21 +33,21 @@ from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 
-VERSION = "1.2"
-MIN = 60
-TIMESTEP = 24
-BATCH_SIZE = 32
-PREDICTION = -1
-VOLUME_DATA = 3000
-FILE_NAME = 'BD/SBER_60.csv'
+VERSION = "1.4"
+MIN = 10
+TIMESTEP = 100
+BATCH_SIZE = 16
+PREDICTION = -5
+VOLUME_DATA = 100000
+FILE_NAME = 'BD/SBER_10.csv'
 
-EPOCH = 5
+EPOCH = 3
 
-MODEL_NAME = f"models/model_{MIN}min_pred__{abs(PREDICTION)}__{VOLUME_DATA}_{VERSION}.keras"
+MODEL_NAME = f"models/model_{MIN}min_step_{TIMESTEP}_pred__{abs(PREDICTION)}__{VOLUME_DATA}_{VERSION}.keras"
 HISTORY_SAVE_PATH = f'training_history_{MODEL_NAME}.pkl'
 print(MODEL_NAME)
 
-data = pd.read_csv(FILE_NAME).iloc[20000:30000]
+data = pd.read_csv(FILE_NAME).iloc[:100000]
 
 
 class NeuroBrain:
@@ -61,42 +61,32 @@ class NeuroBrain:
         ]
 
     def build_model(self, input_shape):
-        """
-        Создает улучшенную модель для прогнозирования цены
-        """
-        self.model = tf.keras.Sequential([
-            # Первый LSTM слой - извлекает сложные временные паттерны
-            tf.keras.layers.LSTM(256, return_sequences=True, input_shape=input_shape,
-                                 kernel_regularizer=tf.keras.regularizers.l2(0.001)),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Dropout(0.3),
+        # === Модель ===
+        inputs = tf.keras.Input(shape=(input_shape))
 
-            # Второй LSTM слой - анализирует зависимости среднего уровня
-            tf.keras.layers.LSTM(128, return_sequences=True,
-                                 kernel_regularizer=tf.keras.regularizers.l2(0.001)),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Dropout(0.3),
+        x = tf.keras.layers.Conv1D(64, 3, activation='relu', padding='causal')(inputs)
+        x = tf.keras.layers.Conv1D(64, 5, activation='relu', padding='causal')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Dropout(0.2)(x)
 
-            # Третий LSTM слой - финальное кодирование временных зависимостей
-            tf.keras.layers.LSTM(64, return_sequences=False,
-                                 kernel_regularizer=tf.keras.regularizers.l2(0.001)),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Dropout(0.3),
+        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(128, return_sequences=True, recurrent_dropout=0.2))(x)
+        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(64, return_sequences=True, recurrent_dropout=0.2))(x)
 
-            # Дополнительные плотные слои для нелинейных преобразований
-            tf.keras.layers.Dense(128, activation='relu',
-                                  kernel_regularizer=tf.keras.regularizers.l2(0.001)),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Dropout(0.2),
+        # === Attention ===
+        attn = tf.keras.layers.MultiHeadAttention(num_heads=4, key_dim=64)
+        attn_out = attn(x, x)
+        attn_out = tf.keras.layers.Dense(128, activation='relu')(attn_out)
+        x = tf.keras.layers.Add()([x, attn_out])
+        x = tf.keras.layers.LayerNormalization()(x)
 
-            tf.keras.layers.Dense(64, activation='relu',
-                                  kernel_regularizer=tf.keras.regularizers.l2(0.001)),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Dropout(0.2),
 
-            tf.keras.layers.Dense(32, activation='relu'),
-            tf.keras.layers.Dense(1)  # Прогноз цены
-        ])
+        x = tf.keras.layers.GlobalAveragePooling1D()(x)
+        x = tf.keras.layers.Dense(128, activation='relu')(x)
+        x = tf.keras.layers.Dropout(0.3)(x)
+        x = tf.keras.layers.Dense(64, activation='relu')(x)
+        outputs = tf.keras.layers.Dense(1, activation='linear')(x)
+
+        self.model = tf.keras.Model(inputs, outputs)
         return self.model
 
     def callbacks(self):
@@ -241,12 +231,13 @@ if __name__ == "__main__":
             epsilon=1e-07
         ),
         loss=tf.keras.losses.Huber(),  # Лучше чем MSE для финансовых данных
-        metrics=['mae', 'mse']
+        metrics=['mae', 'mse', 'accuracy']
     )
 
 
     check = 0
     try:
+        # with tf.device('/GPU:0'):
         history = model.fit(
             X_train, y_train,
             batch_size=BATCH_SIZE,

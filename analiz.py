@@ -8,13 +8,15 @@ import matplotlib.pyplot as plt
 import neuro
 
 
-MODEL_NAME = "models/model_60min_pred__1__3000_1.2.keras"
-FILE_NAME = 'BD/SBER_60.csv'
-TIME_STEPS = 24
+MODEL_NAME = "models/model_10min_step_100_pred__5__20000_1.3.keras"
+FILE_NAME = 'BD/SBER_10.csv'
+VOLUME = 20000
+TIME_STEPS = 100
+NAME_PNG = f"png/png1.3/predictions_step_{TIME_STEPS}_vol_{VOLUME}_b1024.png"
 
 model = tf.keras.models.load_model(MODEL_NAME, compile=False)
 
-new_df = pd.read_csv(FILE_NAME).iloc[-1000:]
+new_df = pd.read_csv(FILE_NAME).iloc[-5000:]
 
 df = neuro.NeuroBrain()
 new_df = df.data_create(new_df)
@@ -86,5 +88,5 @@ ax3.set_ylabel('Количество', fontsize=12)
 ax3.legend()
 ax3.grid(True, alpha=0.3)
 plt.tight_layout()
-plt.savefig('predictions_plot.png', dpi=300, bbox_inches='tight')
+plt.savefig(NAME_PNG, dpi=300, bbox_inches='tight')
 plt.show()
