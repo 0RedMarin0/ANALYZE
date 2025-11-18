@@ -1,53 +1,26 @@
-# === Модель ===
-# inputs = tf.keras.Input(shape=(X_train_seq.shape[1], X_train_seq.shape[2]))
-#
-# x = tf.keras.layers.Conv1D(64, 3, activation='relu', padding='causal')(inputs)
-# x = tf.keras.layers.Conv1D(64, 5, activation='relu', padding='causal')(x)
-# x = tf.keras.layers.BatchNormalization()(x)
-# x = tf.keras.layers.Dropout(0.2)(x)
-#
-# x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(128, return_sequences=True, recurrent_dropout=0.2))(x)
-# x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(64, return_sequences=True, recurrent_dropout=0.2))(x)
-#
-# # === Attention ===
-# attn = tf.keras.layers.MultiHeadAttention(num_heads=4, key_dim=64)
-# attn_out = attn(x, x)
-# attn_out = tf.keras.layers.Dense(128, activation='relu')(attn_out)
-# x = tf.keras.layers.Add()([x, attn_out])
-# x = tf.keras.layers.LayerNormalization()(x)
-#
-#
-# x = tf.keras.layers.GlobalAveragePooling1D()(x)
-# x = tf.keras.layers.Dense(128, activation='relu')(x)
-# x = tf.keras.layers.Dropout(0.3)(x)
-# x = tf.keras.layers.Dense(64, activation='relu')(x)
-# outputs = tf.keras.layers.Dense(1, activation='linear')(x)
-#
-# model = tf.keras.Model(inputs, outputs)
+import os
 import pickle
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import talib
+import matplotlib
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler  # ← Изменил на StandardScaler
+matplotlib.use('TkAgg')
 
-VERSION = "1.4"
+VERSION = "2.5"  # ← Обновил версию
 MIN = 10
 TIMESTEP = 100
-BATCH_SIZE = 16
-PREDICTION = -5
+BATCH_SIZE = 32  # ← Увеличил для GPU
+PREDICTION = -5  # ← Упростил прогноз
 VOLUME_DATA = 100000
 FILE_NAME = 'BD/SBER_10.csv'
 
-EPOCH = 3
+EPOCH = 50  # ← Увеличил эпохи
 
-MODEL_NAME = f"models/model_{MIN}min_step_{TIMESTEP}_pred__{abs(PREDICTION)}__{VOLUME_DATA}_{VERSION}.keras"
-HISTORY_SAVE_PATH = f'training_history_{MODEL_NAME}.pkl'
-print(MODEL_NAME)
-
-data = pd.read_csv(FILE_NAME).iloc[:100000]
+MODEL_NAME = f"models/model_{MIN}min_step_{TIMESTEP}_pred_{abs(PREDICTION)}_{VOLUME_DATA}_{VERSION}.keras"
 
 
 class NeuroBrain:
@@ -61,198 +34,279 @@ class NeuroBrain:
         ]
 
     def build_model(self, input_shape):
-        # === Модель ===
-        inputs = tf.keras.Input(shape=(input_shape))
+        """Модель со смещением и улучшенной архитектурой"""
+        inputs = tf.keras.Input(shape=input_shape)
 
-        x = tf.keras.layers.Conv1D(64, 3, activation='relu', padding='causal')(inputs)
-        x = tf.keras.layers.Conv1D(64, 5, activation='relu', padding='causal')(x)
-        x = tf.keras.layers.BatchNormalization()(x)
-        x = tf.keras.layers.Dropout(0.2)(x)
+        # LSTM слои
+        x = tf.keras.layers.LSTM(64, return_sequences=True)(inputs)
+        x = tf.keras.layers.LSTM(32, return_sequences=False)(x)
 
-        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(128, return_sequences=True, recurrent_dropout=0.2))(x)
-        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(64, return_sequences=True, recurrent_dropout=0.2))(x)
+        # Dense слои с bias (важно!)
+        x = tf.keras.layers.Dense(32, activation='relu', use_bias=True)(x)
+        x = tf.keras.layers.Dense(16, activation='relu', use_bias=True)(x)
 
-        # === Attention ===
-        attn = tf.keras.layers.MultiHeadAttention(num_heads=4, key_dim=64)
-        attn_out = attn(x, x)
-        attn_out = tf.keras.layers.Dense(128, activation='relu')(attn_out)
-        x = tf.keras.layers.Add()([x, attn_out])
-        x = tf.keras.layers.LayerNormalization()(x)
-
-
-        x = tf.keras.layers.GlobalAveragePooling1D()(x)
-        x = tf.keras.layers.Dense(128, activation='relu')(x)
-        x = tf.keras.layers.Dropout(0.3)(x)
-        x = tf.keras.layers.Dense(64, activation='relu')(x)
-        outputs = tf.keras.layers.Dense(1, activation='linear')(x)
+        # Выход с bias
+        outputs = tf.keras.layers.Dense(1, activation='linear', use_bias=True)(x)
 
         self.model = tf.keras.Model(inputs, outputs)
         return self.model
 
     def callbacks(self):
+        """
+        Универсальные callback'ы работают для любой задачи
+        """
         callbacks = [
             tf.keras.callbacks.EarlyStopping(
-                monitor='val_accuracy',  # Следим за accuracy а не loss
-                patience=10,
+                monitor='val_loss',  # ✅ Всегда доступна
+                patience=15,  # ✅ Увеличил терпение
                 restore_best_weights=True,
-                mode='max',
+                mode='min',  # ✅ Минимизируем потерю
                 verbose=1
             ),
             tf.keras.callbacks.ReduceLROnPlateau(
                 monitor='val_loss',
                 factor=0.5,
-                patience=5,
-                min_lr=0.00001,
+                patience=8,  # ✅ Больше patience перед уменьшением LR
+                min_lr=0.000001,  # ✅ Еще меньше минимальный LR
                 verbose=1
             ),
             tf.keras.callbacks.ModelCheckpoint(
-                'best_model.keras',
-                monitor='val_accuracy',
+                'best_model.h5',  # ✅ .h5 более надежно
+                monitor='val_loss',
                 save_best_only=True,
-                mode='max',
+                mode='min',  # ✅ Сохраняем при минимальной потере
                 verbose=1
             )
         ]
         return callbacks
 
     def data_create(self, data):
+        """Создание фич с обработкой NaN"""
+        data = data.copy()
+
+        # Базовые фичи
         data['RSI'] = talib.RSI(data['close'], timeperiod=14)
         data['MACD'], data['MACD_signal'], data['MACD_hist'] = talib.MACD(
             data['close'], fastperiod=12, slowperiod=26, signalperiod=9)
+
+        # Bollinger Bands
         data['BB_upper'], data['BB_middle'], data['BB_lower'] = talib.BBANDS(data['close'])
+
+        # Moving averages
         data['SMA_20'] = talib.SMA(data['close'], timeperiod=20)
         data['EMA_20'] = talib.EMA(data['close'], timeperiod=20)
         data['SMA_100'] = talib.SMA(data['close'], timeperiod=100)
         data['EMA_100'] = talib.EMA(data['close'], timeperiod=100)
+
+        # Дополнительные индикаторы
         data['CCI'] = talib.CCI(data['high'], data['low'], data['close'])
         data['SAR'] = talib.SAR(data['high'], data['low'])
+
+        # Заполняем NaN значения
+        data = data.fillna(method='bfill').fillna(method='ffill')
+
         return data
 
     def create_sequences(self, X, y, time_steps=100):
-        """Создание последовательностей для LSTM"""
+        """Создание последовательностей для временных рядов"""
         Xs, ys = [], []
         for i in range(time_steps, len(X)):
             Xs.append(X[i - time_steps:i])
             ys.append(y[i])
         return np.array(Xs), np.array(ys)
 
-    def combined_price_loss(self, y_true, y_pred):
-        """
-        Комбинированная функция потерь для прогнозирования цены
-        """
-        # 1. Основная MSE loss для точности прогноза
-        mse_loss = tf.keras.losses.mse(y_true, y_pred)
+    def simple_directional_loss(self, y_true, y_pred):
+        """Исправленная функция потерь"""
+        # Основная MSE loss
+        mse_loss = tf.reduce_mean(tf.square(y_true - y_pred))
 
-        # 2. Directional loss с плавным переходом
-        # Используем разницу знаков с плавной функцией
-        true_sign = tf.sign(y_true[1:] - y_true[:-1])
-        pred_sign = tf.sign(y_pred[1:] - y_pred[:-1])
+        # Directional component (для всего батча)
+        true_changes = y_true[1:] - y_true[:-1]  # Изменения между последовательными точками
+        pred_changes = y_pred[1:] - y_pred[:-1]
 
-        # Плавный directional penalty (меньше резких скачков)
-        directional_penalty = tf.where(
-            true_sign != pred_sign,
-            2.0,  # Умеренный штраф
-            1.0
+        # Правильные направления (same sign)
+        correct_directions = tf.cast(
+            tf.equal(tf.sign(true_changes), tf.sign(pred_changes)),
+            tf.float32
         )
 
-        # 3. Volatility-adjusted loss (учет волатильности)
-        price_range = tf.reduce_max(y_true) - tf.reduce_min(y_true)
-        volatility_weight = tf.where(
-            price_range > 0,
-            1.0 + (tf.math.reduce_std(y_true) / (price_range + 1e-7)),
-            1.0
-        )
+        # Directional accuracy (чем больше тем лучше)
+        directional_accuracy = tf.reduce_mean(correct_directions)
 
-        # Комбинируем все компоненты
-        directional_mse = mse_loss * directional_penalty * volatility_weight
+        # Комбинируем: 90% MSE + 10% directional
+        total_loss = 0.9 * mse_loss + 0.1 * (1.0 - directional_accuracy)
 
-        return tf.reduce_mean(directional_mse)
+        return total_loss
 
-    def plot_training_history(self, history):
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-        ax1.plot(history.history['loss'], label='Train Loss')
-        ax1.plot(history.history['val_loss'], label='Val Loss')
-        ax1.set_title('Model Loss')
-        ax1.set_ylabel('Loss')
-        ax1.set_xlabel('Epoch')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        ax2.plot(history.history['accuracy'], label='Train Accuracy')
-        ax2.plot(history.history['val_accuracy'], label='Val Accuracy')
-        ax2.set_title('Model Accuracy')
-        ax2.set_ylabel('Accuracy')
-        ax2.set_xlabel('Epoch')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
+    def plot_predictions(self, y_true, y_pred, title="Прогноз vs Реальность"):
+        """Визуализация прогнозов"""
+        plt.figure(figsize=(15, 8))
+
+        # Берем только первые 500 точек для наглядности
+        n_points = min(500, len(y_true))
+        indices = range(n_points)
+
+        plt.plot(indices, y_true[:n_points], label='Реальные значения', alpha=0.7, linewidth=2)
+        plt.plot(indices, y_pred[:n_points], label='Прогноз', alpha=0.7, linewidth=1.5)
+
+        plt.title(title, fontsize=14)
+        plt.xlabel('Время')
+        plt.ylabel('Целевая переменная')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig('training_results.png', dpi=300, bbox_inches='tight')
+        plt.savefig('predictions_plot.png', dpi=300, bbox_inches='tight')
         plt.show()
 
 
 if __name__ == "__main__":
-    data = pd.read_csv(FILE_NAME).tail(VOLUME_DATA)
+    # Загрузка данных
+    data = pd.read_csv(FILE_NAME).head(VOLUME_DATA)
     neuro = NeuroBrain()
 
+    # Создание фич
     df = neuro.data_create(data)
-    # df["change"] = (df["close"].shift(1) / df["close"]) - 1
-    df["target"] = ((df["close"].shift(-1) / df["close"]) - 1) + \
-                       ((df["close"].shift(-2) / df["close"].shift(-1)) - 1) + \
-                       ((df["close"].shift(-3) / df["close"].shift(-2)) - 1) + \
-                       ((df["close"].shift(-4) / df["close"].shift(-3)) - 1) + \
-                       ((df["close"].shift(-5) / df["close"].shift(-4)) - 1)
-    # df['target'] = df['close'].shift(PREDICTION)
+
+    # УПРОЩЕННАЯ целевая переменная - прогноз на 5 шагов вперед
+    df["target"] = (df["close"].shift(-5) / df["close"]) - 1  # ← Простой и понятный target
+
+    # Удаляем NaN
     df = df.dropna()
 
+    print("=== ИНФОРМАЦИЯ О ДАННЫХ ===")
+    print(f"Размер данных: {len(df)}")
+    print(f"Колонки: {df.columns.tolist()}")
+
+    # Подготовка фич и target
     features = df[neuro.feature_columns]
     target = df['target']
 
-    feature_scaler = MinMaxScaler()
+    # Масштабирование
+    feature_scaler = StandardScaler()
     features_scaled = feature_scaler.fit_transform(features)
+
+
+
+    # Создание последовательностей
     X_seq, y_seq = neuro.create_sequences(features_scaled, target.values, TIMESTEP)
 
-    X_temp, X_test, y_temp, y_test = train_test_split(X_seq, y_seq, test_size=0.15, random_state=42,
-                                                      shuffle=False)
-    X_train, X_val, y_train, y_val = train_test_split(X_temp, y_temp, test_size=0.15 / (1 - 0.15),
-                                                      random_state=42, shuffle=False)
+    print(f"\n=== ИНФОРМАЦИЯ О ПОСЛЕДОВАТЕЛЬНОСТЯХ ===")
+    print(f"X_seq shape: {X_seq.shape}")
+    print(f"y_seq shape: {y_seq.shape}")
 
+    # Разделение на train/val/test с учетом временных рядов
+    train_size = int(0.7 * len(X_seq))
+    val_size = int(0.15 * len(X_seq))
+
+    X_train = X_seq[:train_size]
+    y_train = y_seq[:train_size]
+
+    X_val = X_seq[train_size:train_size + val_size]
+    y_val = y_seq[train_size:train_size + val_size]
+
+    X_test = X_seq[train_size + val_size:]
+    y_test = y_seq[train_size + val_size:]
+
+    print(f"\n=== РАЗДЕЛЕНИЕ ДАННЫХ ===")
+    print(f"Train: {len(X_train)} samples")
+    print(f"Val: {len(X_val)} samples")
+    print(f"Test: {len(X_test)} samples")
+
+    # Диагностика target
+    print(f"\n=== ДИАГНОСТИКА TARGET ===")
+    print(f"Train target - Min: {y_train.min():.6f}, Max: {y_train.max():.6f}")
+    print(f"Train target - Mean: {y_train.mean():.6f}, Std: {y_train.std():.6f}")
+
+    target_scaler = StandardScaler()
+    y_train_scaled = target_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
+    y_val_scaled = target_scaler.transform(y_val.reshape(-1, 1)).flatten()
+
+    # Создание и компиляция модели
     model = neuro.build_model((X_train.shape[1], X_train.shape[2]))
-    # model.compile(
-    #     optimizer=tf.keras.optimizers.Adam(learning_rate=5e-4),
-    #     loss=directional_loss,
-    #     metrics=['mae']
-    # )
-    # model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(
-            learning_rate=0.001,  # Можно увеличить благодаря BatchNorm
-            beta_1=0.9,
-            beta_2=0.999,
-            epsilon=1e-07
-        ),
-        loss=tf.keras.losses.Huber(),  # Лучше чем MSE для финансовых данных
-        metrics=['mae', 'mse', 'accuracy']
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+        loss='mse',  # ← Начните с простого MSE
+        metrics=['mae', 'mse']
     )
 
+    print(f"\n=== ИНФОРМАЦИЯ О МОДЕЛИ ===")
+    model.summary()
 
-    check = 0
+    # Проверка предсказаний ДО обучения
+    print("=== ПРОВЕРКА МОДЕЛИ ДО ОБУЧЕНИЯ ===")
+
+    # Сделаем предсказания на первых 10 samples ДО обучения
+    initial_predictions = model.predict(X_train[:10], verbose=0).flatten()
+    print("Предсказания ДО обучения:")
+    print(initial_predictions)
+
+    print(f"Среднее предсказаний: {np.mean(initial_predictions):.6f}")
+    print(f"Стандартное отклонение: {np.std(initial_predictions):.6f}")
+
+    # Проверяем веса модели
+    print(f"\n=== ПРОВЕРКА ВЕСОВ ===")
+    for layer in model.layers:
+        if hasattr(layer, 'weights') and layer.weights:
+            weights = layer.get_weights()
+            if len(weights) > 0:
+                weight_mean = np.mean(np.abs(weights[0]))
+                print(f"{layer.name}: mean weight = {weight_mean:.6f}")
+
+    # Быстрое обучение на 1 эпоху чтобы посмотреть тренд
+    print(f"\n=== БЫСТРЫЙ ТЕСТ НА 1 ЭПОХУ ===")
+    # Быстрое обучение (строка ~95):
+    test_history = model.fit(
+        X_train[:1000], y_train_scaled[:1000],  # ← y_train_scaled
+        epochs=1, batch_size=32, verbose=1
+    )
+
+    # Проверяем предсказания ПОСЛЕ 1 эпохи
+    after_predictions = model.predict(X_train[:10], verbose=0).flatten()
+    print("Предсказания ПОСЛЕ 1 эпохи:")
+    print(after_predictions)
+    print(f"Среднее после обучения: {np.mean(after_predictions):.6f}")
+    print(f"Стандартное отклонение после: {np.std(after_predictions):.6f}")
+
+    # Если стандартное отклонение близко к 0 - модель предсказывает константу!
+    if np.std(after_predictions) < 0.0001:
+        print("🚨 МОДЕЛЬ ПРЕДСКАЗЫВАЕТ КОНСТАНТУ!")
+    else:
+        print("✅ Модель учится нормально")
+
+    # Обучение
+    print(f"\n=== НАЧАЛО ОБУЧЕНИЯ ===")
     try:
-        # with tf.device('/GPU:0'):
+        # Основное обучение (строка ~110):
         history = model.fit(
-            X_train, y_train,
-            batch_size=BATCH_SIZE,
-            epochs=EPOCH,
-            validation_data=(X_val, y_val),
-            callbacks=neuro.callbacks(),
-            verbose=1
+            X_train, y_train_scaled,  # ← y_train_scaled
+            batch_size=BATCH_SIZE, epochs=EPOCH,
+            validation_data=(X_val, y_val_scaled),  # ← y_val_scaled
+            callbacks=neuro.callbacks(), verbose=1
         )
+
     except KeyboardInterrupt:
-        model.save(MODEL_NAME)
-        check += 1
-
-    if check == 0:
+        print("Обучение прервано пользователем")
         model.save(MODEL_NAME)
 
-    # test_loss, test_accuracy = model.evaluate(X_test, y_test, verbose=0)
-    # neuro.plot_training_history(history)
+    # Сохранение модели
+    model.save(MODEL_NAME)
+    print(f"Модель сохранена как: {MODEL_NAME}")
 
+    test_predictions_scaled = model.predict(X_test, verbose=0).flatten()
+    test_predictions = target_scaler.inverse_transform(test_predictions_scaled.reshape(-1, 1)).flatten()
+
+    # Тестирование и визуализация
+    test_predictions = model.predict(X_test, verbose=0).flatten()
+
+    # Метрики качества
+    test_mae = np.mean(np.abs(y_test - test_predictions))
+    test_mse = np.mean((y_test - test_predictions) ** 2)
+
+    print(f"\n=== РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ ===")
+    print(f"Test MAE: {test_mae:.6f}")
+    print(f"Test MSE: {test_mse:.6f}")
+
+    # Визуализация прогнозов
+    neuro.plot_predictions(y_test, test_predictions,
+                           f"Прогноз vs Реальность (MAE: {test_mae:.4f})")

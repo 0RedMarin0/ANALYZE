@@ -2,21 +2,22 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import matplotlib
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import neuro
 
 
-MODEL_NAME = "models/model_10min_step_100_pred__5__20000_1.3.keras"
-FILE_NAME = 'BD/SBER_10.csv'
-VOLUME = 20000
+MODEL_NAME = "models/model_10min_step_100_pred_5_100000_2.5.keras"
+FILE_NAME = 'BD/SBER_10_NOW.csv'
+VOLUME = 500
 TIME_STEPS = 100
 NAME_PNG = f"png/png1.3/predictions_step_{TIME_STEPS}_vol_{VOLUME}_b1024.png"
 
 model = tf.keras.models.load_model(MODEL_NAME, compile=False)
 
-new_df = pd.read_csv(FILE_NAME).iloc[-5000:]
+new_df = pd.read_csv(FILE_NAME).iloc[-1000:]
 
 df = neuro.NeuroBrain()
 new_df = df.data_create(new_df)
@@ -24,7 +25,7 @@ new_df = new_df.dropna()
 
 feature_columns = df.feature_columns
 #######
-target_scaler = MinMaxScaler()
+target_scaler = StandardScaler()
 
 new_features = new_df[feature_columns]
 new_features_scaled = target_scaler.fit_transform(new_df[feature_columns])
