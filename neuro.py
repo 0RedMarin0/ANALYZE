@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from sklearn.preprocessing import StandardScaler  # ← Изменил на StandardScaler
 matplotlib.use('TkAgg')
 
-VERSION = "2.5"  # ← Обновил версию
+VERSION = "1.0.0"  # ← Обновил версию
 MIN = 10
 TIMESTEP = 100
 BATCH_SIZE = 32  # ← Увеличил для GPU
@@ -17,7 +17,7 @@ FILE_NAME = 'BD/SBER_10.csv'
 
 EPOCH = 50  # ← Увеличил эпохи
 
-MODEL_NAME = f"models/model_{MIN}min_step_{TIMESTEP}_pred_{abs(PREDICTION)}_{VOLUME_DATA}_{VERSION}.keras"
+MODEL_NAME = f"models/MOEX_model_{MIN}min_step_{TIMESTEP}_pred_{abs(PREDICTION)}_{VOLUME_DATA}_e{EPOCH}_{VERSION}.keras"
 
 
 class NeuroBrain:
