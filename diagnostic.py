@@ -406,26 +406,12 @@ def test_model_predictions():
     print(f"Test:  {X_test.shape} ({len(X_test)} samples)")
 
     # Загрузка обученной модели
-    try:
-        model = tf.keras.models.load_model("models/model_10min_step_100_pred_5_100000_2.5.keras")
+    model = tf.keras.models.load_model("models/model_10min_step_100_pred_5_100000_2.5.keras")
 
-        # ДОБАВЬ:
-        try:
-            with open('target_scaler.pkl', 'rb') as f:
-                target_scaler = pickle.load(f)
-            print("✅ Загружен target_scaler")
-        except:
-            print("❌ target_scaler не найден, создаем новый")
-            target_scaler = StandardScaler()
-            target_scaler.fit_transform(y_train.reshape(-1, 1))
-        # Проверка архитектуры модели
-        print(f"Архитектура модели: {model.input_shape} -> {model.output_shape}")
-
-    except Exception as e:
-        print(f"❌ Ошибка загрузки модели: {e}")
-        print("Создаем новую модель для теста...")
-        model = neuro.build_model((X_train.shape[1], X_train.shape[2]))
-        model.compile(optimizer='adam', loss='mse')
+    target_scaler = StandardScaler()
+    y_train_scaled = target_scaler.fit_transform(y_train.reshape(-1, 1))
+    # Проверка архитектуры модели
+    print(f"Архитектура модели: {model.input_shape} -> {model.output_shape}")
 
     # Проверка предсказаний перед анализом
     print("\n=== БЫСТРАЯ ПРОВЕРКА МОДЕЛИ ===")
@@ -444,7 +430,7 @@ def test_model_predictions():
     analyzer.comprehensive_analysis(
         X_test=X_test,
         y_test=y_test,  # оригинальные y_test
-        y_train=y_train,  # оригинальные y_train
+        y_train=y_train_scaled,  # оригинальные y_train
         n_samples=min(2000, len(X_test))
     )
 

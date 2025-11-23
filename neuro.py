@@ -1,12 +1,9 @@
-import os
-import pickle
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import talib
 import matplotlib
 from matplotlib import pyplot as plt
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler  # ← Изменил на StandardScaler
 matplotlib.use('TkAgg')
 
@@ -14,7 +11,7 @@ VERSION = "2.5"  # ← Обновил версию
 MIN = 10
 TIMESTEP = 100
 BATCH_SIZE = 32  # ← Увеличил для GPU
-PREDICTION = -5  # ← Упростил прогноз
+PREDICTION = -20  # ← Упростил прогноз
 VOLUME_DATA = 100000
 FILE_NAME = 'BD/SBER_10.csv'
 
@@ -116,27 +113,21 @@ class NeuroBrain:
         return np.array(Xs), np.array(ys)
 
     def simple_directional_loss(self, y_true, y_pred):
-        """Исправленная функция потерь"""
+        """Упрощенная функция потерь с учетом направления"""
         # Основная MSE loss
         mse_loss = tf.reduce_mean(tf.square(y_true - y_pred))
 
-        # Directional component (для всего батча)
-        true_changes = y_true[1:] - y_true[:-1]  # Изменения между последовательными точками
+        # Вычисление правильных направлений
+        true_changes = y_true[1:] - y_true[:-1]
         pred_changes = y_pred[1:] - y_pred[:-1]
 
-        # Правильные направления (same sign)
-        correct_directions = tf.cast(
-            tf.equal(tf.sign(true_changes), tf.sign(pred_changes)),
-            tf.float32
+        # Directional accuracy
+        directional_accuracy = tf.reduce_mean(
+            tf.cast(tf.sign(true_changes) == tf.sign(pred_changes), tf.float32)
         )
 
-        # Directional accuracy (чем больше тем лучше)
-        directional_accuracy = tf.reduce_mean(correct_directions)
-
-        # Комбинируем: 90% MSE + 10% directional
-        total_loss = 0.9 * mse_loss + 0.1 * (1.0 - directional_accuracy)
-
-        return total_loss
+        # Комбинированная loss: 90% MSE + 10% directional
+        return 0.9 * mse_loss + 0.1 * (1.0 - directional_accuracy)
 
     def plot_predictions(self, y_true, y_pred, title="Прогноз vs Реальность"):
         """Визуализация прогнозов"""
@@ -167,15 +158,9 @@ if __name__ == "__main__":
     # Создание фич
     df = neuro.data_create(data)
 
-    # УПРОЩЕННАЯ целевая переменная - прогноз на 5 шагов вперед
-    df["target"] = (df["close"].shift(-5) / df["close"]) - 1  # ← Простой и понятный target
+    df["target"] = (df["close"].shift(-20) / df["close"]) - 1
 
-    # Удаляем NaN
     df = df.dropna()
-
-    print("=== ИНФОРМАЦИЯ О ДАННЫХ ===")
-    print(f"Размер данных: {len(df)}")
-    print(f"Колонки: {df.columns.tolist()}")
 
     # Подготовка фич и target
     features = df[neuro.feature_columns]
@@ -184,8 +169,6 @@ if __name__ == "__main__":
     # Масштабирование
     feature_scaler = StandardScaler()
     features_scaled = feature_scaler.fit_transform(features)
-
-
 
     # Создание последовательностей
     X_seq, y_seq = neuro.create_sequences(features_scaled, target.values, TIMESTEP)
@@ -207,72 +190,21 @@ if __name__ == "__main__":
     X_test = X_seq[train_size + val_size:]
     y_test = y_seq[train_size + val_size:]
 
-    print(f"\n=== РАЗДЕЛЕНИЕ ДАННЫХ ===")
-    print(f"Train: {len(X_train)} samples")
-    print(f"Val: {len(X_val)} samples")
-    print(f"Test: {len(X_test)} samples")
-
-    # Диагностика target
-    print(f"\n=== ДИАГНОСТИКА TARGET ===")
-    print(f"Train target - Min: {y_train.min():.6f}, Max: {y_train.max():.6f}")
-    print(f"Train target - Mean: {y_train.mean():.6f}, Std: {y_train.std():.6f}")
 
     target_scaler = StandardScaler()
     y_train_scaled = target_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
     y_val_scaled = target_scaler.transform(y_val.reshape(-1, 1)).flatten()
 
-    # Создание и компиляция модели
-    model = neuro.build_model((X_train.shape[1], X_train.shape[2]))
 
+    model = neuro.build_model((X_train.shape[1], X_train.shape[2]))
+    print(X_train.shape[1], X_train.shape[2])
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-        loss='mse',  # ← Начните с простого MSE
+        loss='mse',
         metrics=['mae', 'mse']
     )
-
-    print(f"\n=== ИНФОРМАЦИЯ О МОДЕЛИ ===")
     model.summary()
 
-    # Проверка предсказаний ДО обучения
-    print("=== ПРОВЕРКА МОДЕЛИ ДО ОБУЧЕНИЯ ===")
-
-    # Сделаем предсказания на первых 10 samples ДО обучения
-    initial_predictions = model.predict(X_train[:10], verbose=0).flatten()
-    print("Предсказания ДО обучения:")
-    print(initial_predictions)
-
-    print(f"Среднее предсказаний: {np.mean(initial_predictions):.6f}")
-    print(f"Стандартное отклонение: {np.std(initial_predictions):.6f}")
-
-    # Проверяем веса модели
-    print(f"\n=== ПРОВЕРКА ВЕСОВ ===")
-    for layer in model.layers:
-        if hasattr(layer, 'weights') and layer.weights:
-            weights = layer.get_weights()
-            if len(weights) > 0:
-                weight_mean = np.mean(np.abs(weights[0]))
-                print(f"{layer.name}: mean weight = {weight_mean:.6f}")
-
-    # Быстрое обучение на 1 эпоху чтобы посмотреть тренд
-    print(f"\n=== БЫСТРЫЙ ТЕСТ НА 1 ЭПОХУ ===")
-    # Быстрое обучение (строка ~95):
-    test_history = model.fit(
-        X_train[:1000], y_train_scaled[:1000],  # ← y_train_scaled
-        epochs=1, batch_size=32, verbose=1
-    )
-
-    # Проверяем предсказания ПОСЛЕ 1 эпохи
-    after_predictions = model.predict(X_train[:10], verbose=0).flatten()
-    print("Предсказания ПОСЛЕ 1 эпохи:")
-    print(after_predictions)
-    print(f"Среднее после обучения: {np.mean(after_predictions):.6f}")
-    print(f"Стандартное отклонение после: {np.std(after_predictions):.6f}")
-
-    # Если стандартное отклонение близко к 0 - модель предсказывает константу!
-    if np.std(after_predictions) < 0.0001:
-        print("🚨 МОДЕЛЬ ПРЕДСКАЗЫВАЕТ КОНСТАНТУ!")
-    else:
-        print("✅ Модель учится нормально")
 
     # Обучение
     print(f"\n=== НАЧАЛО ОБУЧЕНИЯ ===")
@@ -292,21 +224,3 @@ if __name__ == "__main__":
     # Сохранение модели
     model.save(MODEL_NAME)
     print(f"Модель сохранена как: {MODEL_NAME}")
-
-    test_predictions_scaled = model.predict(X_test, verbose=0).flatten()
-    test_predictions = target_scaler.inverse_transform(test_predictions_scaled.reshape(-1, 1)).flatten()
-
-    # Тестирование и визуализация
-    test_predictions = model.predict(X_test, verbose=0).flatten()
-
-    # Метрики качества
-    test_mae = np.mean(np.abs(y_test - test_predictions))
-    test_mse = np.mean((y_test - test_predictions) ** 2)
-
-    print(f"\n=== РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ ===")
-    print(f"Test MAE: {test_mae:.6f}")
-    print(f"Test MSE: {test_mse:.6f}")
-
-    # Визуализация прогнозов
-    neuro.plot_predictions(y_test, test_predictions,
-                           f"Прогноз vs Реальность (MAE: {test_mae:.4f})")
