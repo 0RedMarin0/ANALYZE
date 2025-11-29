@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -7,17 +9,17 @@ from matplotlib import pyplot as plt
 from sklearn.preprocessing import StandardScaler  # ← Изменил на StandardScaler
 matplotlib.use('TkAgg')
 
-VERSION = "1.0.0"  # ← Обновил версию
+VERSION = "1.0.1"  # ← Обновил версию
 MIN = 10
 TIMESTEP = 100
-BATCH_SIZE = 32  # ← Увеличил для GPU
-PREDICTION = -20  # ← Упростил прогноз
+BATCH_SIZE = 32
+PREDICTION = -20
 VOLUME_DATA = 100000
 FILE_NAME = 'BD/SBER_10.csv'
 
 EPOCH = 50  # ← Увеличил эпохи
 
-MODEL_NAME = f"models/MOEX_model_{MIN}min_step_{TIMESTEP}_pred_{abs(PREDICTION)}_{VOLUME_DATA}_e{EPOCH}_{VERSION}.keras"
+MODEL_NAME = f"MOEX_model_{MIN}min_step_{TIMESTEP}_pred_{abs(PREDICTION)}_{VOLUME_DATA}_e{EPOCH}"
 
 
 class NeuroBrain:
@@ -30,20 +32,35 @@ class NeuroBrain:
             'RSI', 'MACD', 'MACD_signal', 'MACD_hist'
         ]
 
+
     def build_model(self, input_shape):
-        """Модель со смещением и улучшенной архитектурой"""
         inputs = tf.keras.Input(shape=input_shape)
 
-        # LSTM слои
-        x = tf.keras.layers.LSTM(64, return_sequences=True)(inputs)
-        x = tf.keras.layers.LSTM(32, return_sequences=False)(x)
+        # УСИЛЕННЫЕ LSTM СЛОИ
+        x = tf.keras.layers.LSTM(128, return_sequences=True,
+                               dropout=0.2, recurrent_dropout=0.1)(inputs)
+        x = tf.keras.layers.BatchNormalization()(x)
 
-        # Dense слои с bias (важно!)
-        x = tf.keras.layers.Dense(32, activation='relu', use_bias=True)(x)
-        x = tf.keras.layers.Dense(16, activation='relu', use_bias=True)(x)
+        x = tf.keras.layers.LSTM(96, return_sequences=True,
+                               dropout=0.15, recurrent_dropout=0.1)(x)
+        x = tf.keras.layers.BatchNormalization()(x)
 
-        # Выход с bias
-        outputs = tf.keras.layers.Dense(1, activation='linear', use_bias=True)(x)
+        x = tf.keras.layers.LSTM(64, return_sequences=False,
+                               dropout=0.1)(x)
+
+        # УСИЛЕННЫЕ DENSE СЛОИ
+        x = tf.keras.layers.Dense(96, activation='tanh')(x)
+        x = tf.keras.layers.Dropout(0.25)(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+
+        x = tf.keras.layers.Dense(48, activation='tanh')(x)
+        x = tf.keras.layers.Dropout(0.2)(x)
+
+        x = tf.keras.layers.Dense(24, activation='tanh')(x)
+        x = tf.keras.layers.Dropout(0.15)(x)
+
+        # Выходной слой
+        outputs = tf.keras.layers.Dense(1, activation='tanh')(x)
 
         self.model = tf.keras.Model(inputs, outputs)
         return self.model
@@ -98,9 +115,6 @@ class NeuroBrain:
         # Дополнительные индикаторы
         data['CCI'] = talib.CCI(data['high'], data['low'], data['close'])
         data['SAR'] = talib.SAR(data['high'], data['low'])
-
-        # Заполняем NaN значения
-        data = data.fillna(method='bfill').fillna(method='ffill')
 
         return data
 
@@ -157,9 +171,7 @@ if __name__ == "__main__":
 
     # Создание фич
     df = neuro.data_create(data)
-
-    df["target"] = (df["close"].shift(-20) / df["close"]) - 1
-
+    df["target"] = (df["close"].shift(PREDICTION) / df["close"]) - 1
     df = df.dropna()
 
     # Подготовка фич и target
@@ -195,19 +207,29 @@ if __name__ == "__main__":
     y_train_scaled = target_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
     y_val_scaled = target_scaler.transform(y_val.reshape(-1, 1)).flatten()
 
-
     model = neuro.build_model((X_train.shape[1], X_train.shape[2]))
-    print(X_train.shape[1], X_train.shape[2])
+
+    target_mean = np.mean(target.values)
+    target_centered = target.values - target_mean
+
+    print(f"Было среднее: {target_mean:.6f}")
+    print(f"Стало среднее: {np.mean(target_centered):.6f}")
+
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-        loss='mse',
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.0008),
+        loss=tf.keras.losses.Huber(),
         metrics=['mae', 'mse']
     )
     model.summary()
 
-
+    import joblib
     # Обучение
     print(f"\n=== НАЧАЛО ОБУЧЕНИЯ ===")
+
+    try:
+        os.mkdir(f'models/{MODEL_NAME}')
+    except FileExistsError:
+        print("have direct")
     try:
         # Основное обучение (строка ~110):
         history = model.fit(
@@ -219,8 +241,60 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         print("Обучение прервано пользователем")
-        model.save(MODEL_NAME)
+        model.save(f"models/{MODEL_NAME}/model_{VERSION}.keras")
+        save_data = {
+            'feature_scaler': feature_scaler,
+            'target_scaler': target_scaler,
+            'feature_columns': neuro.feature_columns,
+            'timestep': TIMESTEP,
+        }
+
+        joblib.dump(save_data, f'models/{MODEL_NAME}/model_complete_{VERSION}.pkl')
+        print("✅ Модель и все настройки сохранены!")
+
+        train_predictions = model.predict(X_train[:1000], verbose=0).flatten()
+        print(f"Среднее прогнозов модели: {np.mean(train_predictions):.6f}")
+        print(f"Стандартное отклонение прогнозов: {np.std(train_predictions):.6f}")
+
+        output_layer = model.layers[-1]
+        weights, biases = output_layer.get_weights()
+        print(f"Bias выходного слоя: {biases[0]:.6f}")
+
+        print("=== ДИАГНОСТИКА МОДЕЛИ ===")
+        print(f"1. Среднее таргета: {np.mean(y_train):.6f}")
+        print(f"2. Среднее прогнозов: {np.mean(train_predictions):.6f}")
+        print(f"3. Bias выходного слоя: {biases[0]:.6f}")
+        print(f"4. Loss на трейне: {history.history['loss'][-1]:.6f}")
+        print(f"5. Loss на валидации: {history.history['val_loss'][-1]:.6f}")
+
+
+
+
 
     # Сохранение модели
-    model.save(MODEL_NAME)
-    print(f"Модель сохранена как: {MODEL_NAME}")
+    model.save(f"models/{MODEL_NAME}/model_{VERSION}.keras")
+
+    save_data = {
+        'feature_scaler': feature_scaler,
+        'target_scaler': target_scaler,
+        'feature_columns': neuro.feature_columns,
+        'timestep': TIMESTEP,
+    }
+
+    joblib.dump(save_data, f'models/{MODEL_NAME}/model_complete_{VERSION}.pkl')
+    print("✅ Модель и все настройки сохранены!")
+
+    train_predictions = model.predict(X_train[:1000], verbose=0).flatten()
+    print(f"Среднее прогнозов модели: {np.mean(train_predictions):.6f}")
+    print(f"Стандартное отклонение прогнозов: {np.std(train_predictions):.6f}")
+
+    output_layer = model.layers[-1]
+    weights, biases = output_layer.get_weights()
+    print(f"Bias выходного слоя: {biases[0]:.6f}")
+
+    print("=== ДИАГНОСТИКА МОДЕЛИ ===")
+    print(f"1. Среднее таргета: {np.mean(y_train):.6f}")
+    print(f"2. Среднее прогнозов: {np.mean(train_predictions):.6f}")
+    print(f"3. Bias выходного слоя: {biases[0]:.6f}")
+    print(f"4. Loss на трейне: {history.history['loss'][-1]:.6f}")
+    print(f"5. Loss на валидации: {history.history['val_loss'][-1]:.6f}")

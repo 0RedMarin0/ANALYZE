@@ -1,438 +1,374 @@
-import pickle
-
+import matplotlib
 import numpy as np
 import pandas as pd
-import matplotlib
 import matplotlib.pyplot as plt
-import tensorflow as tf
+import seaborn as sns
+from sklearn.metrics import classification_report, confusion_matrix, precision_recall_curve, roc_auc_score, roc_curve
+from sklearn.calibration import calibration_curve
+import warnings
 matplotlib.use('TkAgg')
+warnings.filterwarnings('ignore')
 
 
-# ДОБАВЬ эти функции вместо sklearn:
-def mean_absolute_error(y_true, y_pred):
-    return np.mean(np.abs(y_true - y_pred))
-
-def mean_squared_error(y_true, y_pred):
-    return np.mean((y_true - y_pred) ** 2)
-
-def r2_score(y_true, y_pred):
-    ss_res = np.sum((y_true - y_pred) ** 2)
-    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-    return 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
-
-
-class StandardScaler:
-    """Простая реализация StandardScaler"""
-
-    def __init__(self):
-        self.mean_ = None
-        self.scale_ = None
-
-    def fit(self, X):
-        self.mean_ = np.mean(X, axis=0)
-        self.scale_ = np.std(X, axis=0)
-        return self
-
-    def fit_transform(self, X):
-        self.fit(X)
-        return self.transform(X)
-
-    def transform(self, X):
-        return (X - self.mean_) / (self.scale_ + 1e-8)
-
-    def inverse_transform(self, X):
-        return (X * self.scale_) + self.mean_
-
-
-class PredictionAnalyzer:
-    def __init__(self, model, feature_columns):
-        self.model = model
-        self.feature_columns = feature_columns
-
-    def comprehensive_analysis(self, X_test, y_test, y_train, n_samples=1000):
+class NeuroDiagnostic:
+    def __init__(self, results_df, actual_returns=None):
         """
-        Комплексный анализ качества прогнозов
+        results_df: DataFrame с колонками ['close', 'probability_rise', 'predicted_class']
+        actual_returns: Фактические доходности через 5 свечей (если есть)
         """
-        print("=" * 70)
-        print("🔍 ДЕТАЛЬНЫЙ АНАЛИЗ ПРОГНОЗОВ МОДЕЛИ")
-        print("=" * 70)
+        self.results_df = results_df.copy()
+        self.actual_returns = actual_returns
+        self.diagnosis_report = {}
 
-        # Делаем прогнозы
-        print("🤖 Выполняю прогнозирование...")
-        predictions = self.model.predict(X_test, verbose=0).flatten()
+    def calculate_future_returns(self, future_prices_df, period=5):
+        """Рассчитывает фактические доходности если передан DataFrame с будущими ценами"""
+        if future_prices_df is not None:
+            future_closes = future_prices_df['close'].values
+            current_closes = self.results_df['close'].values
 
-        # Берем подвыборку для наглядности
-        sample_idx = np.random.choice(len(y_test), min(n_samples, len(y_test)), replace=False)
-        y_sample = y_test[sample_idx]
-        pred_sample = predictions[sample_idx]
+            if len(future_closes) >= len(current_closes) + period:
+                actual_returns = []
+                for i in range(len(current_closes)):
+                    if i + period < len(future_closes):
+                        future_return = (future_closes[i + period] - current_closes[i]) / current_closes[i]
+                        actual_returns.append(1 if future_return > 0 else 0)
 
-        # 1. Базовые метрики качества
-        self._print_basic_metrics(y_sample, pred_sample)
+                self.actual_returns = np.array(actual_returns[:len(self.results_df)])
+                print(f"✅ Рассчитаны фактические доходности для {len(self.actual_returns)} примеров")
 
-        # 2. Сравнение с наивными прогнозами
-        self._compare_with_naive(y_sample, pred_sample, y_train)
+    def run_complete_diagnosis(self):
+        """Запускает полную диагностику модели"""
+        print("🔍 ЗАПУСК ПОЛНОЙ ДИАГНОСТИКИ НЕЙРОСЕТИ")
+        print("=" * 60)
 
-        # 3. Анализ направлений
-        self._analyze_directions(y_sample, pred_sample)
+        self._basic_statistics()
+        self._probability_analysis()
+        self._calibration_analysis()
+        self._temporal_analysis()
+        self._risk_analysis()
 
-        # 4. Статистика ошибок
-        self._error_statistics(y_sample, pred_sample)
+        if self.actual_returns is not None:
+            self._performance_metrics()
+            self._profitability_analysis()
 
-        # 5. Анализ распределений
-        self._distribution_analysis(y_sample, pred_sample)
+        self._generate_report()
 
-        # 6. Детальная визуализация
-        self._create_detailed_plots(y_sample, pred_sample, X_test[sample_idx])
+        return self.diagnosis_report
 
-        # 7. Диагностика проблем
-        self._diagnose_problems(y_sample, pred_sample)
+    def _basic_statistics(self):
+        """Базовая статистика прогнозов"""
+        print("\n📊 1. БАЗОВАЯ СТАТИСТИКА ПРОГНОЗОВ")
 
-        print("=" * 70)
+        total_predictions = len(self.results_df)
+        buy_signals = self.results_df['predicted_class'].sum()
+        sell_signals = total_predictions - buy_signals
 
-    def _print_basic_metrics(self, y_true, y_pred):
-        """Базовые метрики качества"""
-        print("\n📊 БАЗОВЫЕ МЕТРИКИ КАЧЕСТВА:")
+        stats = {
+            'total_predictions': total_predictions,
+            'buy_signals': buy_signals,
+            'sell_signals': sell_signals,
+            'buy_ratio': buy_signals / total_predictions,
+            'avg_probability': self.results_df['probability_rise'].mean(),
+            'prob_std': self.results_df['probability_rise'].std(),
+            'prob_min': self.results_df['probability_rise'].min(),
+            'prob_max': self.results_df['probability_rise'].max()
+        }
 
-        mae = mean_absolute_error(y_true, y_pred)
-        mse = mean_squared_error(y_true, y_pred)
-        rmse = np.sqrt(mse)
-        r2 = r2_score(y_true, y_pred)
+        print(f"   Всего прогнозов: {stats['total_predictions']}")
+        print(f"   Сигналов на покупку: {stats['buy_signals']} ({stats['buy_ratio']:.1%})")
+        print(f"   Сигналов на продажу: {stats['sell_signals']} ({1 - stats['buy_ratio']:.1%})")
+        print(f"   Средняя вероятность: {stats['avg_probability']:.3f}")
+        print(f"   Волатильность вероятностей: {stats['prob_std']:.3f}")
+        print(f"   Диапазон: [{stats['prob_min']:.3f}, {stats['prob_max']:.3f}]")
 
-        print(f"MAE:  {mae:.6f}")
-        print(f"MSE:  {mse:.6f}")
-        print(f"RMSE: {rmse:.6f}")
-        print(f"R²:   {r2:.4f}")
+        self.diagnosis_report['basic_stats'] = stats
 
-        # Интерпретация R²
-        if r2 > 0.7:
-            print("✅ R² > 0.7 - Отличное качество!")
-        elif r2 > 0.5:
-            print("⚠️  R² > 0.5 - Хорошее качество")
-        elif r2 > 0.3:
-            print("🔶 R² > 0.3 - Удовлетворительное")
-        else:
-            print("❌ R² < 0.3 - Низкое качество")
+        # Визуализация распределения
+        plt.figure(figsize=(15, 5))
 
-    def _compare_with_naive(self, y_true, y_pred, y_train):
-        """Сравнение с наивными прогнозами"""
-        print("\n📈 СРАВНЕНИЕ С НАИВНЫМИ ПРОГНОЗАМИ:")
-
-        mae_model = mean_absolute_error(y_true, y_pred)
-
-        # Наивный прогноз 1: последнее значение
-        naive_last = np.roll(y_true, 1)
-        naive_last[0] = y_true[0]  # Первый элемент
-        mae_naive_last = mean_absolute_error(y_true, naive_last)
-
-        # Наивный прогноз 2: среднее значение
-        naive_mean = np.full_like(y_true, np.mean(y_train))
-        mae_naive_mean = mean_absolute_error(y_true, naive_mean)
-
-        # Наивный прогноз 3: случайное значение
-        naive_random = np.random.normal(np.mean(y_train), np.std(y_train), len(y_true))
-        mae_naive_random = mean_absolute_error(y_true, naive_random)
-
-        print(f"MAE модели:          {mae_model:.6f}")
-        print(f"MAE (последнее знач): {mae_naive_last:.6f}")
-        print(f"MAE (среднее):       {mae_naive_mean:.6f}")
-        print(f"MAE (случайное):     {mae_naive_random:.6f}")
-
-        # Процент улучшения
-        improvement_vs_last = ((mae_naive_last - mae_model) / mae_naive_last) * 100
-        improvement_vs_mean = ((mae_naive_mean - mae_model) / mae_naive_mean) * 100
-
-        print(f"\nУлучшение над 'последним значением': {improvement_vs_last:+.1f}%")
-        print(f"Улучшение над 'средним значением':   {improvement_vs_mean:+.1f}%")
-
-        if improvement_vs_last > 0:
-            print("✅ Модель лучше наивных прогнозов!")
-        else:
-            print("❌ Модель хуже наивных прогнозов!")
-
-    def _analyze_directions(self, y_true, y_pred):
-        """Анализ правильности направлений"""
-        print("\n🎯 АНАЛИЗ НАПРАВЛЕНИЙ:")
-
-        # Изменения между последовательными точками
-        actual_changes = np.diff(y_true)
-        predicted_changes = np.diff(y_pred)
-
-        # Правильные направления
-        correct_directions = np.sign(actual_changes) == np.sign(predicted_changes)
-        direction_accuracy = np.mean(correct_directions) * 100
-
-        # Подсчет по категориям
-        positive_correct = np.sum((actual_changes > 0) & (predicted_changes > 0))
-        negative_correct = np.sum((actual_changes < 0) & (predicted_changes < 0))
-        zero_correct = np.sum((actual_changes == 0) & (predicted_changes == 0))
-
-        total_changes = len(actual_changes)
-
-        print(f"Общая точность направлений: {direction_accuracy:.1f}%")
-        print(f"Правильно предсказано ростов:  {positive_correct}/{np.sum(actual_changes > 0)}")
-        print(f"Правильно предсказано падений: {negative_correct}/{np.sum(actual_changes < 0)}")
-        print(f"Случайное угадывание: 50.0%")
-
-        if direction_accuracy > 60:
-            print("✅ Отличная точность направлений!")
-        elif direction_accuracy > 55:
-            print("⚠️  Хорошая точность направлений")
-        elif direction_accuracy > 50:
-            print("🔶 Слабая, но есть сигнал")
-        else:
-            print("❌ Точность хуже случайного угадывания!")
-
-    def _error_statistics(self, y_true, y_pred):
-        """Статистика ошибок"""
-        print("\n📉 СТАТИСТИКА ОШИБОК:")
-
-        errors = y_true - y_pred
-
-        print(f"Средняя ошибка:     {np.mean(errors):.6f} (должна быть ~0)")
-        print(f"Std ошибок:         {np.std(errors):.6f}")
-        print(f"Медианная ошибка:   {np.median(errors):.6f}")
-        print(f"Max положительная:  {np.max(errors):.6f}")
-        print(f"Max отрицательная:  {np.min(errors):.6f}")
-        print(f"MAPE:               {np.mean(np.abs(errors / (y_true + 1e-8))) * 100:.2f}%")
-
-        # Анализ смещения
-        mean_error = np.mean(errors)
-        if abs(mean_error) > 0.01 * np.std(y_true):
-            print(f"⚠️  Обнаружено смещение: {mean_error:.6f}")
-        else:
-            print("✅ Смещение в пределах нормы")
-
-    def _distribution_analysis(self, y_true, y_pred):
-        """Анализ распределений"""
-        print("\n📊 СРАВНЕНИЕ РАСПРЕДЕЛЕНИЙ:")
-
-        print(f"Std реальных значений: {np.std(y_true):.6f}")
-        print(f"Std прогнозов:         {np.std(y_pred):.6f}")
-        print(f"Среднее реальных:      {np.mean(y_true):.6f}")
-        print(f"Среднее прогнозов:     {np.mean(y_pred):.6f}")
-        print(f"Медиана реальных:      {np.median(y_true):.6f}")
-        print(f"Медиана прогнозов:     {np.median(y_pred):.6f}")
-
-        # Коэффициент вариации
-        cv_real = np.std(y_true) / (np.mean(y_true) + 1e-8)
-        cv_pred = np.std(y_pred) / (np.mean(y_pred) + 1e-8)
-        print(f"CV реальных: {cv_real:.4f}")
-        print(f"CV прогнозов: {cv_pred:.4f}")
-
-    def _create_detailed_plots(self, y_true, y_pred, X_sample):
-        """Создание детальных графиков"""
-        fig = plt.figure(figsize=(20, 15))
-
-        # 1. Реальные vs Прогнозные значения
-        plt.subplot(3, 3, 1)
-        plt.scatter(y_true, y_pred, alpha=0.6, s=20)
-        min_val = min(y_true.min(), y_pred.min())
-        max_val = max(y_true.max(), y_pred.max())
-        plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2)
-        plt.xlabel('Реальные значения')
-        plt.ylabel('Прогнозы')
-        plt.title('Реальные vs Прогнозы')
-        plt.grid(True, alpha=0.3)
-
-        # 2. Временной ряд (первые 100 точек)
-        plt.subplot(3, 3, 2)
-        n_plot = min(100, len(y_true))
-        plt.plot(range(n_plot), y_true[:n_plot], label='Реальные', linewidth=2)
-        plt.plot(range(n_plot), y_pred[:n_plot], label='Прогнозы', linewidth=1.5)
-        plt.xlabel('Время')
-        plt.ylabel('Значение')
-        plt.title('Временной ряд (первые 100 точек)')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-
-        # 3. Распределение ошибок
-        plt.subplot(3, 3, 3)
-        errors = y_true - y_pred
-        plt.hist(errors, bins=50, alpha=0.7, edgecolor='black')
-        plt.axvline(x=0, color='red', linestyle='--')
-        plt.xlabel('Ошибка')
+        plt.subplot(1, 3, 1)
+        plt.hist(self.results_df['probability_rise'], bins=50, alpha=0.7, color='skyblue', edgecolor='black')
+        plt.axvline(0.5, color='red', linestyle='--', label='Порог 50%')
+        plt.title('Распределение вероятностей')
+        plt.xlabel('Вероятность роста')
         plt.ylabel('Частота')
-        plt.title('Распределение ошибок')
-        plt.grid(True, alpha=0.3)
-
-        # 4. Распределение реальных и прогнозных значений
-        plt.subplot(3, 3, 4)
-        plt.hist(y_true, bins=50, alpha=0.5, label='Реальные', edgecolor='black')
-        plt.hist(y_pred, bins=50, alpha=0.5, label='Прогнозы', edgecolor='black')
-        plt.xlabel('Значение')
-        plt.ylabel('Частота')
-        plt.title('Сравнение распределений')
         plt.legend()
-        plt.grid(True, alpha=0.3)
 
-        # 5. Кумулятивная ошибка
-        plt.subplot(3, 3, 5)
-        cumulative_error = np.cumsum(errors)
-        plt.plot(cumulative_error)
-        plt.xlabel('Время')
-        plt.ylabel('Кумулятивная ошибка')
-        plt.title('Кумулятивная ошибка прогноза')
-        plt.grid(True, alpha=0.3)
+        plt.subplot(1, 3, 2)
+        signal_counts = [stats['sell_signals'], stats['buy_signals']]
+        plt.pie(signal_counts, labels=['SELL', 'BUY'], autopct='%1.1f%%', colors=['lightcoral', 'lightgreen'])
+        plt.title('Соотношение сигналов')
 
-        # 6. Анализ остатков
-        plt.subplot(3, 3, 6)
-        plt.scatter(y_pred, errors, alpha=0.6, s=20)
-        plt.axhline(y=0, color='red', linestyle='--')
-        plt.xlabel('Прогнозы')
-        plt.ylabel('Ошибки')
-        plt.title('Остатки vs Прогнозы')
-        plt.grid(True, alpha=0.3)
-
-        # 7. QQ-plot для нормальности ошибок
-        plt.subplot(3, 3, 7)
-        # Простая гистограмма вместо QQ-plot
-        plt.hist(errors, bins=30, alpha=0.7, density=True, edgecolor='black')
-        plt.xlabel('Ошибки')
-        plt.ylabel('Плотность')
-        plt.title('Распределение ошибок')
-        plt.grid(True, alpha=0.3)
-
-        # 8. Корреляция признаков с ошибками
-        plt.subplot(3, 3, 8)
-        feature_errors = []
-        for i in range(min(5, X_sample.shape[2])):  # Первые 5 признаков
-            correlation = np.corrcoef(X_sample[:, -1, i].flatten(), errors)[0, 1]
-            feature_errors.append(abs(correlation))
-
-        plt.bar(range(len(feature_errors)), feature_errors)
-        plt.xlabel('Признак')
-        plt.ylabel('|Корреляция с ошибкой|')
-        plt.title('Корреляция признаков с ошибками')
-        plt.grid(True, alpha=0.3)
+        plt.subplot(1, 3, 3)
+        plt.plot(self.results_df['close'], alpha=0.7)
+        buy_points = self.results_df[self.results_df['predicted_class'] == 1].index
+        plt.scatter(buy_points, self.results_df.loc[buy_points, 'close'],
+                    color='green', alpha=0.6, label='BUY сигналы', s=10)
+        plt.title('Сигналы на графике цен')
+        plt.legend()
 
         plt.tight_layout()
-        plt.savefig('detailed_prediction_analysis.png', dpi=300, bbox_inches='tight')
         plt.show()
 
-    def _diagnose_problems(self, y_true, y_pred):
-        """Диагностика проблем модели"""
-        print("\n🔧 ДИАГНОСТИКА ПРОБЛЕМ:")
+    def _probability_analysis(self):
+        """Анализ качества вероятностных прогнозов"""
+        print("\n🎯 2. АНАЛИЗ КАЧЕСТВА ВЕРОЯТНОСТЕЙ")
 
-        errors = y_true - y_pred
-        mae = mean_absolute_error(y_true, y_pred)
-        r2 = r2_score(y_true, y_pred)
+        probs = self.results_df['probability_rise']
 
-        problems = []
+        # Анализ уверенности модели
+        high_confidence = len(probs[probs > 0.7]) + len(probs[probs < 0.3])
+        low_confidence = len(probs[(probs >= 0.4) & (probs <= 0.6)])
 
-        # Проверка 1: Смещение
-        if abs(np.mean(errors)) > 0.02 * np.std(y_true):
-            problems.append("❌ Систематическое смещение прогнозов")
+        confidence_stats = {
+            'high_confidence_ratio': high_confidence / len(probs),
+            'low_confidence_ratio': low_confidence / len(probs),
+            'uncertain_predictions': len(probs[(probs > 0.45) & (probs < 0.55)]),
+            'extreme_predictions': len(probs[probs > 0.9]) + len(probs[probs < 0.1])
+        }
 
-        # Проверка 2: Низкая дисперсия прогнозов
-        if np.std(y_pred) < 0.5 * np.std(y_true):
-            problems.append("❌ Прогнозы имеют слишком низкую дисперсию")
+        print(f"   Высокая уверенность (>0.7 или <0.3): {confidence_stats['high_confidence_ratio']:.1%}")
+        print(f"   Низкая уверенность (0.4-0.6): {confidence_stats['low_confidence_ratio']:.1%}")
+        print(f"   Неопределенные прогнозы (0.45-0.55): {confidence_stats['uncertain_predictions']}")
+        print(f"   Экстремальные прогнозы (>0.9 или <0.1): {confidence_stats['extreme_predictions']}")
 
-        # Проверка 3: Плохая корреляция
-        correlation = np.corrcoef(y_true, y_pred)[0, 1]
-        if correlation < 0.3:
-            problems.append("❌ Низкая корреляция с реальными значениями")
+        self.diagnosis_report['confidence_analysis'] = confidence_stats
 
-        # Проверка 4: Низкое R²
-        if r2 < 0.3:
-            problems.append("❌ Низкое R² - модель плохо объясняет дисперсию")
+    def _calibration_analysis(self):
+        """Анализ калибровки вероятностей"""
+        print("\n📈 3. АНАЛИЗ КАЛИБРОВКИ ВЕРОЯТНОСТЕЙ")
 
-        # Проверка 5: Большие ошибки
-        if mae > 0.5 * np.std(y_true):
-            problems.append("❌ Слишком большие ошибки прогнозирования")
+        if self.actual_returns is not None:
+            prob_true, prob_pred = calibration_curve(self.actual_returns,
+                                                     self.results_df['probability_rise'],
+                                                     n_bins=10)
 
-        if problems:
-            print("Обнаружены проблемы:")
-            for problem in problems:
-                print(f"  {problem}")
-        else:
-            print("✅ Критических проблем не обнаружено")
+            # Идеальная калибровка
+            perfect_calibration = np.linspace(0, 1, 10)
+
+            plt.figure(figsize=(10, 6))
+            plt.plot(prob_pred, prob_true, 's-', label='Модель')
+            plt.plot(perfect_calibration, perfect_calibration, '--', label='Идеальная калибровка')
+            plt.xlabel('Предсказанная вероятность')
+            plt.ylabel('Фактическая доля положительных')
+            plt.title('Калибровочная кривая')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.show()
+
+            # Мера калибровки
+            calibration_error = np.mean((prob_true - prob_pred) ** 2)
+            print(f"   Ошибка калибровки: {calibration_error:.4f}")
+
+            self.diagnosis_report['calibration_error'] = calibration_error
+
+    def _temporal_analysis(self):
+        """Анализ временных паттернов"""
+        print("\n⏰ 4. ВРЕМЕННОЙ АНАЛИЗ")
+
+        # Анализ кластеризации сигналов
+        signals = self.results_df['predicted_class'].values
+        signal_changes = np.diff(signals)
+        volatility = np.sum(signal_changes != 0) / len(signal_changes)
+
+        # Поиск длинных серий
+        from itertools import groupby
+        series_lengths = [len(list(group)) for _, group in groupby(signals)]
+        avg_series_length = np.mean(series_lengths)
+        max_series_length = max(series_lengths)
+
+        temporal_stats = {
+            'signal_volatility': volatility,
+            'avg_series_length': avg_series_length,
+            'max_series_length': max_series_length,
+            'total_series': len(series_lengths)
+        }
+
+        print(f"   Волатильность сигналов: {temporal_stats['signal_volatility']:.3f}")
+        print(f"   Средняя длина серии: {temporal_stats['avg_series_length']:.1f} свечей")
+        print(f"   Максимальная длина серии: {temporal_stats['max_series_length']} свечей")
+        print(f"   Всего серий сигналов: {temporal_stats['total_series']}")
+
+        self.diagnosis_report['temporal_analysis'] = temporal_stats
+
+    def _risk_analysis(self):
+        """Анализ рисков"""
+        print("\n⚠️  5. АНАЛИЗ РИСКОВ")
+
+        probs = self.results_df['probability_rise']
+
+        risk_stats = {
+            'high_risk_buy': len(probs[(probs > 0.5) & (probs < 0.6)]),
+            'high_risk_sell': len(probs[(probs < 0.5) & (probs > 0.4)]),
+            'ambiguous_signals': len(probs[(probs >= 0.48) & (probs <= 0.52)])
+        }
+
+        print(f"   Рискованные покупки (0.5-0.6): {risk_stats['high_risk_buy']}")
+        print(f"   Рискованные продажи (0.4-0.5): {risk_stats['high_risk_sell']}")
+        print(f"   Неоднозначные сигналы (0.48-0.52): {risk_stats['ambiguous_signals']}")
+
+        self.diagnosis_report['risk_analysis'] = risk_stats
+
+    def _performance_metrics(self):
+        """Метрики производительности если есть фактические данные"""
+        print("\n🏆 6. МЕТРИКИ ПРОИЗВОДИТЕЛЬНОСТИ")
+
+        y_true = self.actual_returns
+        y_pred = self.results_df['predicted_class'].values[:len(y_true)]
+        y_prob = self.results_df['probability_rise'].values[:len(y_true)]
+
+        # Основные метрики
+        cm = confusion_matrix(y_true, y_pred)
+        accuracy = np.mean(y_true == y_pred)
+        precision = cm[1, 1] / (cm[1, 1] + cm[0, 1]) if (cm[1, 1] + cm[0, 1]) > 0 else 0
+        recall = cm[1, 1] / (cm[1, 1] + cm[1, 0]) if (cm[1, 1] + cm[1, 0]) > 0 else 0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+
+        try:
+            auc_roc = roc_auc_score(y_true, y_prob)
+        except:
+            auc_roc = 0.5
+
+        performance_stats = {
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1,
+            'auc_roc': auc_roc,
+            'confusion_matrix': cm.tolist()
+        }
+
+        print(f"   Accuracy: {accuracy:.3f}")
+        print(f"   Precision: {precision:.3f}")
+        print(f"   Recall: {recall:.3f}")
+        print(f"   F1-Score: {f1:.3f}")
+        print(f"   AUC-ROC: {auc_roc:.3f}")
+        print(f"   Матрица ошибок:")
+        print(f"      [[TN={cm[0, 0]}, FP={cm[0, 1]}]")
+        print(f"       [FN={cm[1, 0]}, TP={cm[1, 1]}]]")
+
+        # ROC кривая
+        fpr, tpr, _ = roc_curve(y_true, y_prob)
+        plt.figure(figsize=(10, 6))
+        plt.plot(fpr, tpr, label=f'ROC curve (AUC = {auc_roc:.3f})')
+        plt.plot([0, 1], [0, 1], 'k--', label='Random classifier')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('ROC Curve')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()
+
+        self.diagnosis_report['performance_metrics'] = performance_stats
+
+    def _profitability_analysis(self):
+        """Анализ прибыльности"""
+        print("\n💰 7. АНАЛИЗ ПРИБЫЛЬНОСТИ")
+
+        if self.actual_returns is not None:
+            # Простая стратегия: покупать при сигнале > 0.5
+            signals = self.results_df['predicted_class'].values[:len(self.actual_returns)]
+            returns = self.actual_returns
+
+            # Доходность стратегии
+            strategy_returns = returns * (signals == 1)
+            buy_hold_returns = returns  # Buy & Hold для сравнения
+
+            total_strategy_return = np.sum(strategy_returns)
+            total_buy_hold_return = np.sum(buy_hold_returns)
+
+            profitability_stats = {
+                'total_strategy_return': total_strategy_return,
+                'total_buy_hold_return': total_buy_hold_return,
+                'excess_return': total_strategy_return - total_buy_hold_return,
+                'win_rate': np.mean(strategy_returns > 0),
+                'avg_return_per_trade': np.mean(strategy_returns[strategy_returns != 0]) if np.any(
+                    strategy_returns != 0) else 0
+            }
+
+            print(f"   Общая доходность стратегии: {profitability_stats['total_strategy_return']:.4f}")
+            print(f"   Общая доходность Buy&Hold: {profitability_stats['total_buy_hold_return']:.4f}")
+            print(f"   Превышение над рынком: {profitability_stats['excess_return']:.4f}")
+            print(f"   Win Rate: {profitability_stats['win_rate']:.3f}")
+            print(f"   Средняя доходность сделки: {profitability_stats['avg_return_per_trade']:.4f}")
+
+            self.diagnosis_report['profitability'] = profitability_stats
+
+    def _generate_report(self):
+        """Генерация итогового отчета с рекомендациями"""
+        print("\n" + "=" * 60)
+        print("📋 ИТОГОВЫЙ ДИАГНОСТИЧЕСКИЙ ОТЧЕТ")
+        print("=" * 60)
+
+        basic = self.diagnosis_report.get('basic_stats', {})
+        confidence = self.diagnosis_report.get('confidence_analysis', {})
+        temporal = self.diagnosis_report.get('temporal_analysis', {})
+        risk = self.diagnosis_report.get('risk_analysis', {})
+        performance = self.diagnosis_report.get('performance_metrics', {})
+        profitability = self.diagnosis_report.get('profitability', {})
+
+        # Анализ проблем и рекомендации
+        issues = []
+        recommendations = []
+
+        # Проверка баланса сигналов
+        if basic.get('buy_ratio', 0.5) > 0.7 or basic.get('buy_ratio', 0.5) < 0.3:
+            issues.append("Дисбаланс сигналов покупки/продажи")
+            recommendations.append("Настроить порог классификации или сбалансировать данные")
+
+        # Проверка уверенности
+        if confidence.get('low_confidence_ratio', 0) > 0.4:
+            issues.append("Много неопределенных прогнозов")
+            recommendations.append("Увеличить сложность модели или улучшить признаки")
+
+        # Проверка волатильности сигналов
+        if temporal.get('signal_volatility', 0) > 0.5:
+            issues.append("Высокая волатильность сигналов")
+            recommendations.append("Добавить фильтрацию или сглаживание прогнозов")
+
+        # Проверка производительности
+        if performance:
+            if performance.get('accuracy', 0) < 0.55:
+                issues.append("Низкая точность прогнозов")
+                recommendations.append("Пересмотреть признаки или архитектуру модели")
+
+            if performance.get('precision', 0) < 0.5:
+                issues.append("Много ложных срабатываний")
+                recommendations.append("Повысить порог для сигналов покупки")
+
+        # Вывод проблем
+        if issues:
+            print("\n🚨 ВЫЯВЛЕННЫЕ ПРОБЛЕМЫ:")
+            for i, issue in enumerate(issues, 1):
+                print(f"   {i}. {issue}")
 
         # Рекомендации
-        print("\n💡 РЕКОМЕНДАЦИИ:")
-        if r2 < 0.5:
-            print("  • Улучшите архитектуру модели")
-            print("  • Добавьте больше признаков")
-            print("  • Увеличьте объем тренировочных данных")
+        if recommendations:
+            print("\n💡 РЕКОМЕНДАЦИИ ПО УЛУЧШЕНИЮ:")
+            for i, rec in enumerate(recommendations, 1):
+                print(f"   {i}. {rec}")
 
-        if np.std(y_pred) < 0.5 * np.std(y_true):
-            print("  • Уменьшите регуляризацию")
-            print("  • Увеличьте learning rate")
-            print("  • Попробуйте другую архитектуру")
+        if not issues:
+            print("\n✅ Критических проблем не обнаружено!")
+
+        print(f"\n📊 ОБЩАЯ ОЦЕНКА: {'⚠️ ТРЕБУЕТСЯ ДОРАБОТКА' if issues else '✅ СТАБИЛЬНАЯ РАБОТА'}")
+
+        # Сохраняем полный отчет
+        self.diagnosis_report['issues'] = issues
+        self.diagnosis_report['recommendations'] = recommendations
+
+        return self.diagnosis_report
 
 
-# Использование:
-def test_model_predictions():
-    """Тестирование прогнозов модели"""
+# Пример использования
+if __name__ == "__main__":
+    # Загрузите ваш results_df
+    results_df = pd.read_csv('predictions_results.csv')
 
-    # Загрузка данных
-    new_df = pd.read_csv("BD/SBER_10_NOW.csv").iloc[:5000]
-    print(f"Загружено данных: {len(new_df)} строк")
+    # Создайте диагностику
+    diagnostic = NeuroDiagnostic(results_df)
 
-    # Создание нейросети и фич
-    import neuro as ne
-    neuro = ne.NeuroBrain()
-    df = neuro.data_create(new_df)
+    # Запустите диагностику
+    report = diagnostic.run_complete_diagnosis()
 
-    # Создание целевой переменной
-    df["target"] = (df["close"].shift(-5) / df["close"]) - 1
-    df = df.dropna()
-
-    print(f"Данные после создания фич: {len(df)} строк")
-
-    # Подготовка фич и target
-    features = df[neuro.feature_columns]
-    target = df['target']
-
-    # Масштабирование фич
-    feature_scaler = StandardScaler()
-    features_scaled = feature_scaler.fit_transform(features)
-
-    # Создание последовательностей
-    X_seq, y_seq = neuro.create_sequences(features_scaled, target.values, 100)
-
-    print(f"Создано последовательностей: {X_seq.shape}")
-
-    # Разделение на train/test
-    train_size = int(0.85 * len(X_seq))  # 85% для обучения, 15% для теста
-
-    X_train = X_seq[:train_size]
-    y_train = y_seq[:train_size]
-
-    X_test = X_seq[train_size:]
-    y_test = y_seq[train_size:]
-
-    print(f"\n=== РАЗДЕЛЕНИЕ ДАННЫХ ===")
-    print(f"Train: {X_train.shape} ({len(X_train)} samples)")
-    print(f"Test:  {X_test.shape} ({len(X_test)} samples)")
-
-    # Загрузка обученной модели
-    model = tf.keras.models.load_model("models/model_10min_step_100_pred_5_100000_2.5.keras")
-
-    target_scaler = StandardScaler()
-    y_train_scaled = target_scaler.fit_transform(y_train.reshape(-1, 1))
-    # Проверка архитектуры модели
-    print(f"Архитектура модели: {model.input_shape} -> {model.output_shape}")
-
-    # Проверка предсказаний перед анализом
-    print("\n=== БЫСТРАЯ ПРОВЕРКА МОДЕЛИ ===")
-    test_predictions_scaled = model.predict(X_test[:5], verbose=0)
-    test_predictions = target_scaler.inverse_transform(test_predictions_scaled.reshape(-1, 1)).flatten()
-    print("Примеры предсказаний:")
-    for i, (true, pred) in enumerate(zip(y_test[:5], test_predictions.flatten())):
-        print(f"  Sample {i}: True={true:.6f}, Pred={pred:.6f}, Error={abs(true - pred):.6f}")
-
-    # Запуск анализатора
-    print(f"\n=== ЗАПУСК АНАЛИЗАТОРА ПРОГНОЗОВ ===")
-    analyzer = PredictionAnalyzer(model, neuro.feature_columns)
-    test_predictions_scaled = model.predict(X_test, verbose=0)
-    test_predictions = target_scaler.inverse_transform(test_predictions_scaled.reshape(-1, 1)).flatten()
-
-    analyzer.comprehensive_analysis(
-        X_test=X_test,
-        y_test=y_test,  # оригинальные y_test
-        y_train=y_train_scaled,  # оригинальные y_train
-        n_samples=min(2000, len(X_test))
-    )
-
-# Добавьте этот вызов после обучения модели:
-test_model_predictions()
+    print("📋 Загрузите ваш results_df и запустите диагностику!")
