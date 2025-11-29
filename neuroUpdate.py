@@ -1,121 +1,86 @@
-import numpy as np
 import pandas as pd
-import tensorflow as tf
+import numpy as np
 import talib
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers, callbacks
+import joblib
 
-# === ПАРАМЕТРЫ ===
-FILE = 'BDcrypt/CRYPTO_ETHUSDT_15m_YEAR.csv'  # 👉 Новый актив
-MODEL_NAME = 'models/crypto_model_15_delta_FINAL.keras'
-NEW_MODEL_NAME = 'models/crypto_model_15_delta_FINAL_CONT.keras'  # Новый файл после дообучения
-TIME_STEPS = 350
+# Конфигурация распределенных вычислений
+strategy = tf.distribute.MultiWorkerMirroredStrategy()
 
-# === ЗАГРУЖАЕМ СУЩЕСТВУЮЩУЮ МОДЕЛЬ ===
-print("🔁 Загружаем обученную модель...")
-model = tf.keras.models.load_model(MODEL_NAME)
-print("✅ Модель загружена успешно!")
+DATA_FILE = 'BD/SBER_10.csv'
+MODEL_FILE = 'model_price_forecast.h5'
+SCALER_X_FILE = 'scaler_x.pkl'
+SCALER_Y_FILE = 'scaler_y.pkl'
+FORECAST_HORIZON = 20
+TEST_SIZE = 0.2
+RANDOM_STATE = 42
+EPOCHS = 100
+BATCH_SIZE = 64
+PATIENCE = 15
 
-# === ЗАГРУЖАЕМ НОВЫЙ ДАТАСЕТ ===
-df = pd.read_csv(FILE).tail(5000)
+df = pd.read_csv(DATA_FILE)
 
-# === ИНДИКАТОРЫ ===
-df['RSI'] = talib.RSI(df['close'])
-df['MACD'], df['MACD_signal'], df['MACD_hist'] = talib.MACD(df['close'])
-df['BB_upper'], df['BB_middle'], df['BB_lower'] = talib.BBANDS(df['close'])
-df['SMA_20'] = talib.SMA(df['close'], 20)
-df['EMA_20'] = talib.EMA(df['close'], 20)
-df['SMA_50'] = talib.SMA(df['close'], 50)
-df['SMA_100'] = talib.SMA(df['close'], 100)
-df['EMA_100'] = talib.EMA(df['close'], 100)
-df['SMA_200'] = talib.SMA(df['close'], 200)
-df['EMA_200'] = talib.EMA(df['close'], 200)
-df['CCI'] = talib.CCI(df['high'], df['low'], df['close'])
-df['ADX'] = talib.ADX(df['high'], df['low'], df['close'])
-df['volatility'] = talib.ATR(df['high'], df['low'], df['close'], 14)
+df['RSI'] = talib.RSI(df['close'], timeperiod=14)
+df['MACD'], df['MACD_signal'], df['MACD_hist'] = talib.MACD(df['close'], fastperiod=12, slowperiod=26, signalperiod=9)
+df['SMA_20'] = talib.SMA(df['close'], timeperiod=20)
+df['EMA_20'] = talib.EMA(df['close'], timeperiod=20)
+df['BBANDS_upper'], df['BBANDS_middle'], df['BBANDS_lower'] = talib.BBANDS(df['close'], timeperiod=20)
+df['ATR'] = talib.ATR(df['high'], df['low'], df['close'], timeperiod=14)
+df['ADX'] = talib.ADX(df['high'], df['low'], df['close'], timeperiod=14)
+df['CCI'] = talib.CCI(df['high'], df['low'], df['close'], timeperiod=14)
+df['MOM'] = talib.MOM(df['close'], timeperiod=10)
+df['OBV'] = talib.OBV(df['close'], df['volume'])
 
-# === КОНТЕКСТ ===
-df['trend_strength'] = df['SMA_50'] / df['SMA_200'] - 1
-df['momentum'] = df['close'] / df['close'].shift(10) - 1
-df['vol_ratio'] = df['volume'] / df['volume'].rolling(50).mean()
-df['price_pos'] = (df['close'] - df['low'].rolling(100).min()) / (
-    df['high'].rolling(100).max() - df['low'].rolling(100).min()
-)
+df['target'] = (df['close'].shift(-FORECAST_HORIZON) / df['close']) - 1
 
-df['slope'] = df['close'].diff(5)
-df['slope'] = df['slope'] / df['close'].shift(5)
-
-df['candle_body'] = df['close'] - df['open']
-df['upper_shadow'] = df['high'] - df[['close', 'open']].max(axis=1)
-df['lower_shadow'] = df[['close', 'open']].min(axis=1) - df['low']
-
-df['returns'] = df['close'].pct_change()
-df['log_return'] = np.log(df['close'] / df['close'].shift(1))
-
-# === ЦЕЛЕВАЯ ПЕРЕМЕННАЯ ===
-df['target_close'] = np.log(df['close'].shift(-20) / df['close'])
 df = df.dropna()
 
-# === ПРИЗНАКИ ===
-feature_columns = [
-    'open', 'high', 'low', 'close', 'volume',
-    'RSI', 'MACD', 'MACD_signal', 'MACD_hist',
-    'BB_upper', 'BB_middle', 'BB_lower',
-    'SMA_20', 'EMA_20', 'SMA_100', 'EMA_100', 'SMA_200', 'EMA_200', 'SMA_50',
-    'CCI', 'ADX', 'volatility',
-    'trend_strength', 'momentum', 'vol_ratio', 'price_pos', 'slope',
-    'candle_body', 'upper_shadow', 'lower_shadow', 'returns', 'log_return'
+feature_columns = ['open', 'close', 'high', 'low', 'volume',
+                   'RSI', 'MACD', 'MACD_signal', 'MACD_hist',
+                   'SMA_20', 'EMA_20', 'BBANDS_upper', 'BBANDS_middle', 'BBANDS_lower',
+                   'ATR', 'ADX', 'CCI', 'MOM', 'OBV']
+
+X = df[feature_columns].values
+y = df['target'].values.reshape(-1, 1)
+
+scaler_x = StandardScaler()
+scaler_y = StandardScaler()
+
+X_scaled = scaler_x.fit_transform(X)
+y_scaled = scaler_y.fit_transform(y)
+
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_scaled, test_size=TEST_SIZE, random_state=RANDOM_STATE,
+                                                    shuffle=False)
+
+# Создание модели внутри стратегии распределения
+with strategy.scope():
+    model = keras.Sequential([
+        layers.Dense(128, activation='relu', input_shape=(X_train.shape[1],)),
+        layers.Dropout(0.3),
+        layers.Dense(64, activation='relu'),
+        layers.Dropout(0.2),
+        layers.Dense(32, activation='relu'),
+        layers.Dense(1)
+    ])
+
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+callback_list = [
+    callbacks.EarlyStopping(monitor='val_loss', patience=PATIENCE, restore_best_weights=True),
+    callbacks.ModelCheckpoint(MODEL_FILE, monitor='val_loss', save_best_only=True),
+    callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=7, min_lr=1e-7)
 ]
 
+model.fit(X_train, y_train,
+          validation_data=(X_test, y_test),
+          epochs=EPOCHS,
+          batch_size=BATCH_SIZE * strategy.num_replicas_in_sync,
+          callbacks=callback_list,
+          verbose=1)
 
-features = df[feature_columns]
-target = df['target_close']
-
-# === СКЕЙЛИНГ ===
-feature_scaler = StandardScaler()
-features_scaled = feature_scaler.fit_transform(features)
-target_values = target.values.reshape(-1, 1)
-
-# === РАЗДЕЛЕНИЕ ===
-train_size = int(0.85 * len(features_scaled))
-X_train = features_scaled[:train_size]
-y_train = target_values[:train_size]
-X_val = features_scaled[train_size:]
-y_val = target_values[train_size:]
-
-def create_sequences(X, y, time_steps=100):
-    Xs, ys = [], []
-    for i in range(time_steps, len(X)):
-        Xs.append(X[i - time_steps:i])
-        ys.append(y[i])
-    return np.array(Xs), np.array(ys)
-
-X_train_seq, y_train_seq = create_sequences(X_train, y_train, TIME_STEPS)
-X_val_seq, y_val_seq = create_sequences(X_val, y_val, TIME_STEPS)
-
-print(f"📈 Данные для дообучения: {X_train_seq.shape}")
-
-# === CALLBACKS ===
-callbacks = [
-    EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True, verbose=1),
-    ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-5, verbose=1)
-]
-
-# === ПРОДОЛЖАЕМ ОБУЧЕНИЕ ===
-print("🚀 Продолжаем обучение на новом активе...")
-history = model.fit(
-    X_train_seq, y_train_seq,
-    epochs=10,                # 👈 Можно поставить 5–10 для мягкой подгонки
-    batch_size=128,
-    validation_data=(X_val_seq, y_val_seq),
-    callbacks=callbacks,
-    verbose=1
-)
-
-# === СОХРАНЯЕМ ОБНОВЛЁННУЮ МОДЕЛЬ ===
-model.save(NEW_MODEL_NAME)
-print(f"✅ Модель дообучена и сохранена как {NEW_MODEL_NAME}")
-
-import joblib
-feature_scaler = joblib.load("scalers/feature_scaler.pkl")
-
+joblib.dump(scaler_x, SCALER_X_FILE)
+joblib.dump(scaler_y, SCALER_Y_FILE)
