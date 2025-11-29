@@ -1,3 +1,5 @@
+import os
+import json
 import pandas as pd
 import numpy as np
 import talib
@@ -8,9 +10,17 @@ from tensorflow import keras
 from tensorflow.keras import layers, callbacks
 import joblib
 
-# Конфигурация распределенных вычислений
-strategy = tf.distribute.MultiWorkerMirroredStrategy()
+# === КОНФИГУРАЦИЯ ДЛЯ ГЛАВНОГО КОМПЬЮТЕРА ===
+TF_CONFIG = {
+    'cluster': {
+        'worker': ['192.168.0.110']  # замените на реальные IP
+    },
+    'task': {'type': 'worker', 'index': 0}  # для второго компьютера поменяйте на index: 1
+}
 
+os.environ['TF_CONFIG'] = json.dumps(TF_CONFIG)
+
+# Остальной ваш код без изменений
 DATA_FILE = 'BD/SBER_10.csv'
 MODEL_FILE = 'model_price_forecast.h5'
 SCALER_X_FILE = 'scaler_x.pkl'
@@ -21,6 +31,9 @@ RANDOM_STATE = 42
 EPOCHS = 100
 BATCH_SIZE = 64
 PATIENCE = 15
+
+print("Инициализация распределенного обучения...")
+strategy = tf.distribute.MultiWorkerMirroredStrategy()
 
 df = pd.read_csv(DATA_FILE)
 
@@ -56,7 +69,8 @@ y_scaled = scaler_y.fit_transform(y)
 X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_scaled, test_size=TEST_SIZE, random_state=RANDOM_STATE,
                                                     shuffle=False)
 
-# Создание модели внутри стратегии распределения
+print(f"Количество реплик: {strategy.num_replicas_in_sync}")
+
 with strategy.scope():
     model = keras.Sequential([
         layers.Dense(128, activation='relu', input_shape=(X_train.shape[1],)),
@@ -75,6 +89,7 @@ callback_list = [
     callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=7, min_lr=1e-7)
 ]
 
+print("Начало обучения...")
 model.fit(X_train, y_train,
           validation_data=(X_test, y_test),
           epochs=EPOCHS,
@@ -84,3 +99,4 @@ model.fit(X_train, y_train,
 
 joblib.dump(scaler_x, SCALER_X_FILE)
 joblib.dump(scaler_y, SCALER_Y_FILE)
+print("Обучение завершено!")
