@@ -21,4 +21,4 @@ TF_CONFIG_WORKER = {
 # os.environ['TF_CONFIG'] = json.dumps(TF_CONFIG_MASTER)
 
 # На втором компьютере выполнить:
-# os.environ['TF_CONFIG'] = json.dumps(TF_CONFIG_WORKER)
+os.environ['TF_CONFIG'] = json.dumps(TF_CONFIG_WORKER)
