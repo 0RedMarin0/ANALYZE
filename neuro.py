@@ -3,18 +3,17 @@ import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import talib
 import matplotlib
 from matplotlib import pyplot as plt
 from sklearn.preprocessing import StandardScaler  # ← Изменил на StandardScaler
 matplotlib.use('TkAgg')
 
-VERSION = "1.0.1"  # ← Обновил версию
+VERSION = "2.0.3"  # ← Обновил версию
 MIN = 10
 TIMESTEP = 100
 BATCH_SIZE = 32
-PREDICTION = -20
-VOLUME_DATA = 100000
+PREDICTION = -10
+VOLUME_DATA = 40000
 FILE_NAME = 'BD/SBER_10.csv'
 
 EPOCH = 50  # ← Увеличил эпохи
@@ -25,12 +24,6 @@ MODEL_NAME = f"MOEX_model_{MIN}min_step_{TIMESTEP}_pred_{abs(PREDICTION)}_{VOLUM
 class NeuroBrain:
     def __init__(self):
         self.model = None
-        self.feature_columns = [
-            'open', 'high', 'low', 'close', 'volume',
-            'BB_upper', 'BB_middle', 'BB_lower', 'SMA_20',
-            'EMA_20', 'SMA_100', 'EMA_100', 'CCI', 'SAR',
-            'RSI', 'MACD', 'MACD_signal', 'MACD_hist'
-        ]
 
 
     def build_model(self, input_shape):
@@ -40,11 +33,9 @@ class NeuroBrain:
         x = tf.keras.layers.LSTM(128, return_sequences=True,
                                dropout=0.2, recurrent_dropout=0.1)(inputs)
         x = tf.keras.layers.BatchNormalization()(x)
-
         x = tf.keras.layers.LSTM(96, return_sequences=True,
                                dropout=0.15, recurrent_dropout=0.1)(x)
         x = tf.keras.layers.BatchNormalization()(x)
-
         x = tf.keras.layers.LSTM(64, return_sequences=False,
                                dropout=0.1)(x)
 
@@ -94,30 +85,6 @@ class NeuroBrain:
         ]
         return callbacks
 
-    def data_create(self, data):
-        """Создание фич с обработкой NaN"""
-        data = data.copy()
-
-        # Базовые фичи
-        data['RSI'] = talib.RSI(data['close'], timeperiod=14)
-        data['MACD'], data['MACD_signal'], data['MACD_hist'] = talib.MACD(
-            data['close'], fastperiod=12, slowperiod=26, signalperiod=9)
-
-        # Bollinger Bands
-        data['BB_upper'], data['BB_middle'], data['BB_lower'] = talib.BBANDS(data['close'])
-
-        # Moving averages
-        data['SMA_20'] = talib.SMA(data['close'], timeperiod=20)
-        data['EMA_20'] = talib.EMA(data['close'], timeperiod=20)
-        data['SMA_100'] = talib.SMA(data['close'], timeperiod=100)
-        data['EMA_100'] = talib.EMA(data['close'], timeperiod=100)
-
-        # Дополнительные индикаторы
-        data['CCI'] = talib.CCI(data['high'], data['low'], data['close'])
-        data['SAR'] = talib.SAR(data['high'], data['low'])
-
-        return data
-
     def create_sequences(self, X, y, time_steps=100):
         """Создание последовательностей для временных рядов"""
         Xs, ys = [], []
@@ -125,23 +92,6 @@ class NeuroBrain:
             Xs.append(X[i - time_steps:i])
             ys.append(y[i])
         return np.array(Xs), np.array(ys)
-
-    def simple_directional_loss(self, y_true, y_pred):
-        """Упрощенная функция потерь с учетом направления"""
-        # Основная MSE loss
-        mse_loss = tf.reduce_mean(tf.square(y_true - y_pred))
-
-        # Вычисление правильных направлений
-        true_changes = y_true[1:] - y_true[:-1]
-        pred_changes = y_pred[1:] - y_pred[:-1]
-
-        # Directional accuracy
-        directional_accuracy = tf.reduce_mean(
-            tf.cast(tf.sign(true_changes) == tf.sign(pred_changes), tf.float32)
-        )
-
-        # Комбинированная loss: 90% MSE + 10% directional
-        return 0.9 * mse_loss + 0.1 * (1.0 - directional_accuracy)
 
     def plot_predictions(self, y_true, y_pred, title="Прогноз vs Реальность"):
         """Визуализация прогнозов"""
@@ -170,12 +120,14 @@ if __name__ == "__main__":
     neuro = NeuroBrain()
 
     # Создание фич
-    df = neuro.data_create(data)
-    df["target"] = (df["close"].shift(PREDICTION) / df["close"]) - 1
+    import table
+    df0 = table.DataCreate(data)
+    df = df0.table
+    df["target"] = df["RSI"].shift(PREDICTION)
     df = df.dropna()
 
     # Подготовка фич и target
-    features = df[neuro.feature_columns]
+    features = df[df0.list_sign]
     target = df['target']
 
     # Масштабирование
@@ -242,30 +194,11 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Обучение прервано пользователем")
         model.save(f"models/{MODEL_NAME}/model_{VERSION}.keras")
-        save_data = {
-            'feature_scaler': feature_scaler,
-            'target_scaler': target_scaler,
-            'feature_columns': neuro.feature_columns,
-            'timestep': TIMESTEP,
-        }
 
-        joblib.dump(save_data, f'models/{MODEL_NAME}/model_complete_{VERSION}.pkl')
+        # joblib.dump(save_data, f'models/{MODEL_NAME}/model_complete_{VERSION}.pkl')
         print("✅ Модель и все настройки сохранены!")
 
-        train_predictions = model.predict(X_train[:1000], verbose=0).flatten()
-        print(f"Среднее прогнозов модели: {np.mean(train_predictions):.6f}")
-        print(f"Стандартное отклонение прогнозов: {np.std(train_predictions):.6f}")
 
-        output_layer = model.layers[-1]
-        weights, biases = output_layer.get_weights()
-        print(f"Bias выходного слоя: {biases[0]:.6f}")
-
-        print("=== ДИАГНОСТИКА МОДЕЛИ ===")
-        print(f"1. Среднее таргета: {np.mean(y_train):.6f}")
-        print(f"2. Среднее прогнозов: {np.mean(train_predictions):.6f}")
-        print(f"3. Bias выходного слоя: {biases[0]:.6f}")
-        print(f"4. Loss на трейне: {history.history['loss'][-1]:.6f}")
-        print(f"5. Loss на валидации: {history.history['val_loss'][-1]:.6f}")
 
 
 
@@ -274,27 +207,27 @@ if __name__ == "__main__":
     # Сохранение модели
     model.save(f"models/{MODEL_NAME}/model_{VERSION}.keras")
 
-    save_data = {
-        'feature_scaler': feature_scaler,
-        'target_scaler': target_scaler,
-        'feature_columns': neuro.feature_columns,
-        'timestep': TIMESTEP,
-    }
-
-    joblib.dump(save_data, f'models/{MODEL_NAME}/model_complete_{VERSION}.pkl')
+    # save_data = {
+    #     'feature_scaler': feature_scaler,
+    #     'target_scaler': target_scaler,
+    #     'feature_columns': neuro.feature_columns,
+    #     'timestep': TIMESTEP,
+    # }
+    #
+    # joblib.dump(save_data, f'models/{MODEL_NAME}/model_complete_{VERSION}.pkl')
     print("✅ Модель и все настройки сохранены!")
-
-    train_predictions = model.predict(X_train[:1000], verbose=0).flatten()
-    print(f"Среднее прогнозов модели: {np.mean(train_predictions):.6f}")
-    print(f"Стандартное отклонение прогнозов: {np.std(train_predictions):.6f}")
-
-    output_layer = model.layers[-1]
-    weights, biases = output_layer.get_weights()
-    print(f"Bias выходного слоя: {biases[0]:.6f}")
-
-    print("=== ДИАГНОСТИКА МОДЕЛИ ===")
-    print(f"1. Среднее таргета: {np.mean(y_train):.6f}")
-    print(f"2. Среднее прогнозов: {np.mean(train_predictions):.6f}")
-    print(f"3. Bias выходного слоя: {biases[0]:.6f}")
-    print(f"4. Loss на трейне: {history.history['loss'][-1]:.6f}")
-    print(f"5. Loss на валидации: {history.history['val_loss'][-1]:.6f}")
+    #
+    # train_predictions = model.predict(X_train[:1000], verbose=0).flatten()
+    # print(f"Среднее прогнозов модели: {np.mean(train_predictions):.6f}")
+    # print(f"Стандартное отклонение прогнозов: {np.std(train_predictions):.6f}")
+    #
+    # output_layer = model.layers[-1]
+    # weights, biases = output_layer.get_weights()
+    # print(f"Bias выходного слоя: {biases[0]:.6f}")
+    #
+    # print("=== ДИАГНОСТИКА МОДЕЛИ ===")
+    # print(f"1. Среднее таргета: {np.mean(y_train):.6f}")
+    # print(f"2. Среднее прогнозов: {np.mean(train_predictions):.6f}")
+    # print(f"3. Bias выходного слоя: {biases[0]:.6f}")
+    # print(f"4. Loss на трейне: {history.history['loss'][-1]:.6f}")
+    # print(f"5. Loss на валидации: {history.history['val_loss'][-1]:.6f}")

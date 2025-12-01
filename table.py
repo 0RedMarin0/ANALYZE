@@ -5,13 +5,36 @@ import talib
 
 class DataCreate:
     def __init__(self, data):
-        self.data = pandas.read_csv(data)
+        self.data = data # pandas.read_csv(data)
 
-        self.list_sign = ['open', 'high', 'low', 'close', 'volume']
+        self.list_sign = [] # 'open', 'high', 'low', 'close', 'volume'
 
-        self.indi_on()
+        self.modif()
 
         self.table = self.data.dropna()
+
+    def modif(self):
+        self.list_sign.extend(['RSI', 'MACD', 'MACD_signal', 'MACD_hist', 'CCI',
+                               'ADX', 'STOCH_K', 'STOCH_D', 'ATR',
+                               'MFI', 'WILLR', 'percent'])
+
+        self.data['RSI'] = talib.RSI(self.data['close'])
+        self.data['MACD'], self.data['MACD_signal'], self.data['MACD_hist'] = talib.MACD(self.data['close'])
+        self.data['CCI'] = talib.CCI(self.data['high'], self.data['low'], self.data['close'], timeperiod=20)
+        self.data['ADX'] = talib.ADX(self.data['high'], self.data['low'], self.data['close'], timeperiod=14)
+        self.data['STOCH_K'], self.data['STOCH_D'] = talib.STOCH(
+            self.data['high'], self.data['low'], self.data['close'],
+            fastk_period=14,
+            slowk_period=3,
+            slowd_period=3,
+        )
+        self.data['ATR'] = talib.ATR(self.data['high'], self.data['low'], self.data['close'], timeperiod=14)
+        # self.data['OBV'] = talib.OBV(self.data['close'], self.data['volume'])
+        self.data['MFI'] = talib.MFI(self.data['high'], self.data['low'], self.data['close'],
+                                        self.data['volume'], timeperiod=14)
+        self.data['WILLR'] = talib.WILLR(self.data['high'], self.data['low'], self.data['close'], timeperiod=14)
+        self.data['percent'] = (self.data['close'].shift(-1) / self.data['close']) - 1
+
 
 
     def indi_on(self):

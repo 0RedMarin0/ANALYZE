@@ -5,26 +5,28 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 
 import neuro
+import table
 
-MODEL = "models/MOEX_model_10min_step_100_pred_20_100000_e50/"
+MODEL = "models/MOEX_model_10min_step_100_pred_20_20000_e50/"
 
 class NeuroPredictor:
     def __init__(self):
         """Загружает модель и все настройки одним файлом"""
-        data = joblib.load(f"{MODEL}/model_complete_1.0.1.pkl")
-        self.model = tf.keras.models.load_model(f"{MODEL}/model_1.0.1.keras", compile=False)
+        data = joblib.load(f"{MODEL}/model_complete_2.0.1.pkl")
+        self.model = tf.keras.models.load_model(f"{MODEL}/model_2.0.1.keras", compile=False)
         self.feature_scaler = data['feature_scaler']
         self.target_scaler = data['target_scaler']
         self.feature_columns = data['feature_columns']
         self.timestep = data['timestep']
-        self.neuro_brain = neuro.NeuroBrain()
+        ddd = pd.read_csv(f"BD/SBER_10_NOW.csv")
+        self.neuro_brain = table.DataCreate(ddd)
 
         print(f"✅ Модель загружена: {len(self.feature_columns)} признаков, timestep={self.timestep}")
 
     def predict(self, new_df):
         """Просто передай DataFrame - получи прогноз"""
         # Предобработка данных
-        processed_df = self.neuro_brain.data_create(new_df)
+        processed_df = self.neuro_brain.table
         processed_df = processed_df.dropna()
 
         # Масштабирование признаков

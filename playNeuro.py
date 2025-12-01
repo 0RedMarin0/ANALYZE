@@ -1,54 +1,80 @@
-import matplotlib
-import pandas as pd
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
-from NeuroPredictor import NeuroPredictor
+import table
 
-# Константы
-MODEL_NAME = "model_complete.pkl"  # теперь используем наш пакет
+MODEL_NAME = "models/MOEX_model_10min_step_100_pred_20_20000_e50/model_2.0.2.keras"
 FILE_NAME = 'BD/SBER_10_NOW.csv'
-VOLUME = 500
-NAME_PNG = f"png/predictions_vol_{VOLUME}.png"
+TIMESTEP = 100
+PREDICTION = -20
+VOLUME_DATA = 20000
+NAME_PNG = f"predictions_indicator_model.png"
 
-# 🎯 ВСЕГО 3 ОСНОВНЫЕ СТРОКИ ДЛЯ ПРОГНОЗА!
-predictor = NeuroPredictor()
-new_df = pd.read_csv(FILE_NAME)
-close_prices, probabilities = predictor.predict(new_df)
+model = tf.keras.models.load_model(MODEL_NAME, compile=False)
 
-# Сохраняем результаты
-results_df = predictor.save_predictions(close_prices, probabilities)
+new_df = pd.read_csv(FILE_NAME).tail(5000)
 
-print("\nПервые 10 прогнозов:")
-print(results_df.head(10))
+df0 = table.DataCreate(new_df)
+df = df0.table
+print(len(df))
+df["target"] = df["RSI"].shift(PREDICTION)
 
-# Визуализация (ваш код без изменений)
-print("Создание графиков...")
-fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(15, 12), sharex=True)
+feature_columns = df0.list_sign
+features = df[feature_columns]
+target = df['target']
 
-# График 1: Цены закрытия
-ax1.plot(results_df.index, results_df['close'], label='Close Price', color='blue', linewidth=2)
-ax1.set_title('Цены закрытия (база для прогноза)', fontsize=14, fontweight='bold')
-ax1.set_ylabel('Цена', fontsize=12)
-ax1.legend()
+def create_prediction_sequences(data, time_steps=100):
+    X_pred = []
+    for i in range(time_steps, len(data)):
+        X_pred.append(data[i-time_steps:i])
+    return np.array(X_pred)
+
+X_pred_seq = create_prediction_sequences(features.values, TIMESTEP)
+probabilities = model.predict(X_pred_seq, verbose=1).flatten()
+
+close_prices = df['close'].values[TIMESTEP:]
+results_df = pd.DataFrame({
+    'close': close_prices,
+    'rsi_prediction': probabilities,
+    'rsi_actual': target.values[TIMESTEP:]
+})
+
+results_df.to_csv('predictions_rsi_results.csv', index=False)
+
+fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(15, 10), sharex=True)
+
+ax1.plot(results_df.index, results_df['close'], color='blue', linewidth=2)
+ax1.set_title('Цены закрытия')
+ax1.set_ylabel('Цена')
 ax1.grid(True, alpha=0.3)
 
-# График 2: Вероятности роста
-ax2.plot(results_df.index, results_df['probability_rise'] * 100, color='green', linewidth=2)
-ax2.set_title('Вероятность роста через 5 свечей (%)', fontsize=14, fontweight='bold')
-ax2.set_ylabel('Вероятность роста (%)', fontsize=12)
+# ax2.plot(results_df.index, results_df['rsi_actual']*100, label='Фактический RSI', alpha=0.7)
+ax2.plot(results_df.index, (results_df['rsi_prediction'] + 1) * 50, label='Прогноз RSI', alpha=0.7)
+ax2.set_title('RSI: Прогноз vs Факт')
+ax2.set_ylabel('RSI chek')
 ax2.legend()
 ax2.grid(True, alpha=0.3)
 
-# График 3: Распределение вероятностей
-ax3.hist(results_df['probability_rise'], bins=50, color='purple', alpha=0.7, edgecolor='black')
-ax3.axvline(x=0.5, color='red', linestyle='--', linewidth=2, label='Порог 50%')
-ax3.set_title('Распределение вероятностей роста', fontsize=14, fontweight='bold')
-ax3.set_xlabel('Вероятность роста', fontsize=12)
-ax3.set_ylabel('Количество', fontsize=12)
+ax3.plot(results_df.index, df['RSI'].values[TIMESTEP:], label='RSI', alpha=0.7)
+ax3.set_title('RSI')
+ax3.set_ylabel('RSI')
 ax3.legend()
 ax3.grid(True, alpha=0.3)
+
+ax4.plot(results_df.index, results_df['rsi_actual'], label='RSI -20', alpha=0.7)
+ax4.set_title('RSI -20')
+ax4.set_ylabel('RSI - 20')
+ax4.legend()
+ax4.grid(True, alpha=0.3)
 
 plt.tight_layout()
 plt.savefig(NAME_PNG, dpi=300, bbox_inches='tight')
 plt.show()
+
+print("Прогнозы сохранены в predictions_rsi_results.csv")
