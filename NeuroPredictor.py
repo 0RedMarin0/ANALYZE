@@ -1,64 +1,94 @@
 import numpy as np
-import pandas as pd
 import tensorflow as tf
-from sklearn.preprocessing import StandardScaler
-import joblib
 
-import neuro
-import table
+print("=== ФИНАЛЬНЫЙ ТЕСТ С ЦЕНТРИРОВАНИЕМ ===")
 
-MODEL = "models/MOEX_model_10min_step_100_pred_20_20000_e50/"
+# 1. Данные с ЦЕНТРИРОВАНИЕМ
+n_samples = 100
+simple_data = np.array([[i, i, i, i, i] for i in range(1, n_samples + 1)], dtype=float)
+simple_target = np.array([i + 1 for i in range(1, n_samples)], dtype=float)
 
-class NeuroPredictor:
-    def __init__(self):
-        """Загружает модель и все настройки одним файлом"""
-        data = joblib.load(f"{MODEL}/model_complete_2.0.1.pkl")
-        self.model = tf.keras.models.load_model(f"{MODEL}/model_2.0.1.keras", compile=False)
-        self.feature_scaler = data['feature_scaler']
-        self.target_scaler = data['target_scaler']
-        self.feature_columns = data['feature_columns']
-        self.timestep = data['timestep']
-        ddd = pd.read_csv(f"BD/SBER_10_NOW.csv")
-        self.neuro_brain = table.DataCreate(ddd)
+# ЦЕНТРИРУЕМ!
+data_mean = np.mean(simple_data)
+data_std = np.std(simple_data)
+simple_data_centered = (simple_data - data_mean) / data_std
+simple_target_centered = (simple_target - data_mean) / data_std
 
-        print(f"✅ Модель загружена: {len(self.feature_columns)} признаков, timestep={self.timestep}")
+print(f"До центрирования: mean={data_mean:.2f}, std={data_std:.2f}")
+print(f"После: mean={np.mean(simple_data_centered):.2f}, std={np.std(simple_data_centered):.2f}")
 
-    def predict(self, new_df):
-        """Просто передай DataFrame - получи прогноз"""
-        # Предобработка данных
-        processed_df = self.neuro_brain.table
-        processed_df = processed_df.dropna()
+# 2. Последовательности
+TIMESTEP = 1
+X_seq, y_seq = [], []
+for i in range(TIMESTEP, len(simple_data_centered) - 1):
+    X_seq.append(simple_data_centered[i - TIMESTEP:i])
+    y_seq.append(simple_target_centered[i - 1])
 
-        # Масштабирование признаков
-        new_features = processed_df[self.feature_columns]
-        new_features_scaled = self.feature_scaler.transform(new_features)
+X_seq = np.array(X_seq)
+y_seq = np.array(y_seq)
 
-        # Создание последовательностей
-        X_pred_seq = self.create_prediction_sequences(new_features_scaled, self.timestep)
+# 3. Модель
+model = tf.keras.Sequential([
+    tf.keras.layers.Flatten(input_shape=(TIMESTEP, 5)),
+    tf.keras.layers.Dense(1, kernel_initializer='zeros', bias_initializer='zeros')
+])
 
-        # Прогноз
-        probabilities = self.model.predict(X_pred_seq, verbose=0).flatten()
+# МЕНЬШИЙ learning rate!
+model.compile(
+    optimizer=tf.keras.optimizers.SGD(learning_rate=0.01),
+    loss='mse'
+)
 
-        # Получаем соответствующие цены закрытия
-        close_prices = processed_df['close'].values[self.timestep:]
+print(f"\nНачальные веса: {model.layers[1].get_weights()[0].flatten()}")
+print(f"Начальный bias: {model.layers[1].get_weights()[1][0]}")
 
-        return close_prices, probabilities
+# 4. Обучение с validation
+print("\n=== ОБУЧЕНИЕ ===")
+history = model.fit(
+    X_seq, y_seq,
+    epochs=100,  # БОЛЬШЕ эпох!
+    batch_size=16,
+    validation_split=0.2,
+    verbose=0
+)
 
-    def create_prediction_sequences(self, data, time_steps):
-        """Создает последовательности для прогнозирования"""
-        X_pred = []
-        for i in range(time_steps, len(data)):
-            X_pred.append(data[i - time_steps:i])
-        return np.array(X_pred)
+print(f"Final loss: {history.history['loss'][-1]:.6f}")
 
-    def save_predictions(self, close_prices, probabilities, filename='predictions_results.csv'):
-        """Сохраняет результаты прогноза"""
-        results_df = pd.DataFrame({
-            'close': close_prices,
-            'probability_rise': probabilities,
-            'predicted_class': (probabilities > 0.2).astype(int)
-        })
+# 5. Веса после обучения
+weights, bias = model.layers[1].get_weights()
+print(f"\nПосле обучения:")
+print(f"Веса: {weights.flatten().round(4)}")
+print(f"Bias: {bias[0]:.6f}")
 
-        results_df.to_csv(filename, index=False)
-        print(f"✅ Прогнозы сохранены в {filename}")
-        return results_df
+# 6. ОБРАТНОЕ ПРЕОБРАЗОВАНИЕ для проверки
+print("\n=== ПРОВЕРКА С ОБРАТНЫМ ПРЕОБРАЗОВАНИЕМ ===")
+
+# Тестовый пример: x=2 → должен быть y=3
+test_x = np.array([2, 2, 2, 2, 2], dtype=float)
+test_x_centered = (test_x - data_mean) / data_std
+test_input = test_x_centered.reshape(1, 1, 5)
+
+# Предсказание
+pred_centered = model.predict(test_input, verbose=0)[0][0]
+
+# Обратное преобразование
+pred_original = pred_centered * data_std + data_mean
+
+print(f"\nТест: x={test_x[0]}, ожидаемый y={test_x[0] + 1}")
+print(f"Предсказание: {pred_original:.4f}")
+print(f"Ошибка: {abs(pred_original - (test_x[0] + 1)):.4f}")
+
+# 7. Проверка нескольких примеров
+print("\n=== ТЕСТ НЕСКОЛЬКИХ ПРИМЕРОВ ===")
+test_values = [2, 10, 50, 100]
+
+for x in test_values:
+    test_x = np.array([x, x, x, x, x], dtype=float)
+    test_x_centered = (test_x - data_mean) / data_std
+    test_input = test_x_centered.reshape(1, 1, 5)
+
+    pred_centered = model.predict(test_input, verbose=0)[0][0]
+    pred_original = pred_centered * data_std + data_mean
+
+    print(f"x={x:3d}: предсказано {pred_original:6.2f}, должно быть {x + 1:3d}, "
+          f"ошибка {abs(pred_original - (x + 1)):5.2f}")

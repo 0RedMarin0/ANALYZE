@@ -33,8 +33,7 @@ class DataCreate:
         self.data['MFI'] = talib.MFI(self.data['high'], self.data['low'], self.data['close'],
                                         self.data['volume'], timeperiod=14)
         self.data['WILLR'] = talib.WILLR(self.data['high'], self.data['low'], self.data['close'], timeperiod=14)
-        self.data['percent'] = (self.data['close'].shift(-1) / self.data['close']) - 1
-
+        self.data['percent'] = (self.data['close'] / self.data['close'].shift(1)) - 1
 
 
     def indi_on(self):

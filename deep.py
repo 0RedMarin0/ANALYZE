@@ -62,6 +62,6 @@ if __name__ == '__main__':
     end_date = datetime(2025, 5, 22, 23, 59, 0)  # 2025-07-01 12:00:00
     interval = 10
     day = 7
-    ticker = 'SBER'
+    ticker = 'TATN'
     filename = f'BD/{ticker}_{interval}_NOW.csv'
     start(filename, start_date, end_date, interval, day, ticker)
